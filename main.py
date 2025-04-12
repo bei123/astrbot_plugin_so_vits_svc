@@ -146,6 +146,8 @@ class VoiceConverter:
         self.base_setting = self.config.get("base_setting", {})
         self.voice_config = self.config.get("voice_config", {})
         self.executor = ThreadPoolExecutor(max_workers=1)  # 限制同时只能处理一个转换任务
+        self.current_task = None  # 当前正在执行的任务
+        self.task_lock = asyncio.Lock()  # 任务锁
 
         # API 设置
         self.api_url = self.base_setting.get("base_url", "http://localhost:1145")
@@ -184,15 +186,23 @@ class VoiceConverter:
         pitch_adjust: Optional[int] = None,
     ) -> bool:
         """异步转换语音"""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            self.executor,
-            self.convert_voice,
-            input_wav,
-            output_wav,
-            speaker_id,
-            pitch_adjust,
-        )
+        async with self.task_lock:  # 使用锁确保同一时间只有一个任务在执行
+            if self.current_task is not None:
+                raise RuntimeError("当前已有任务正在处理，请等待完成后再试")
+
+            try:
+                self.current_task = asyncio.current_task()
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(
+                    self.executor,
+                    self.convert_voice,
+                    input_wav,
+                    output_wav,
+                    speaker_id,
+                    pitch_adjust,
+                )
+            finally:
+                self.current_task = None
 
     def convert_voice(
         self,
