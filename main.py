@@ -11,15 +11,91 @@ import requests
 import uuid
 import json
 from .netease_api import NeteaseMusicAPI
-import asyncio
-import sys
-import mimetypes
-import aiohttp
-from astrbot.core.initial_loader import InitialLoader
-from astrbot.core import db_helper
-from astrbot.core import logger, LogManager, LogBroker
-from astrbot.core.config.default import VERSION
-from astrbot.core.utils.io import download_dashboard, get_dashboard_version
+
+class MSSTProcessor:
+    def __init__(self, api_url: str = "http://localhost:9000"):
+        """初始化 MSST 处理器
+        
+        Args:
+            api_url: MSST-WebUI API 地址
+        """
+        self.api_url = api_url
+        self.session = requests.Session()
+        
+    def get_presets(self) -> list:
+        """获取可用的预设列表
+        
+        Returns:
+            预设文件列表
+        """
+        try:
+            response = self.session.get(f"{self.api_url}/presets")
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('status') == 'success':
+                    return result.get('presets', [])
+            logger.error(f"获取预设列表失败: {response.text}")
+            return []
+        except Exception as e:
+            logger.error(f"获取预设列表出错: {str(e)}")
+            return []
+        
+    def process_audio(self, input_file: str, preset_name: str = "wav.json") -> Optional[str]:
+        """处理音频文件
+        
+        Args:
+            input_file: 输入音频文件路径
+            preset_name: 预设文件名，默认为 wav.json
+            
+        Returns:
+            处理后的音频文件路径，如果失败则返回 None
+        """
+        try:
+            # 读取音频文件
+            with open(input_file, 'rb') as f:
+                audio_data = f.read()
+                
+            # 准备请求数据
+            files = {
+                'input_file': ('input.wav', audio_data, 'audio/wav')
+            }
+            data = {
+                'preset_path': preset_name,
+                'output_format': 'wav',
+                'extra_output_dir': 'false'
+            }
+            
+            # 发送请求
+            response = self.session.post(
+                f"{self.api_url}/infer/local",
+                files=files,
+                data=data
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result['status'] == 'success':
+                    # 获取输出文件列表
+                    output_files = self.session.get(f"{self.api_url}/list_outputs").json()
+                    if output_files and output_files['files']:
+                        # 下载第一个输出文件
+                        output_file = output_files['files'][0]
+                        download_url = f"{self.api_url}/download/{output_file['name']}"
+                        download_response = self.session.get(download_url)
+                        
+                        if download_response.status_code == 200:
+                            # 保存处理后的文件
+                            output_path = os.path.join(os.path.dirname(input_file), f"processed_{os.path.basename(input_file)}")
+                            with open(output_path, 'wb') as f:
+                                f.write(download_response.content)
+                            return output_path
+                            
+            logger.error(f"MSST 处理失败: {response.text}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"MSST 处理出错: {str(e)}")
+            return None
 
 class VoiceConverter:
     def __init__(self, config: Dict):
@@ -40,10 +116,12 @@ class VoiceConverter:
         self.default_speaker = self.voice_config.get('default_speaker', '0')
         self.default_pitch = self.voice_config.get('default_pitch', 0)
         
-        # infer接口设置
-        self.infer_url = self.base_setting.get('infer_url', 'http://localhost:9000/infer')
+        # MSST 设置
+        self.msst_url = self.base_setting.get('msst_url', 'http://localhost:9000')
+        self.msst_preset = self.base_setting.get('msst_preset', 'wav.json')
         
         self.session = requests.Session()
+        self.msst_processor = MSSTProcessor(self.msst_url)
             
     def check_health(self):
         """检查服务健康状态"""
@@ -54,7 +132,7 @@ class VoiceConverter:
             logger.error(f"健康检查失败: {str(e)}")
             return None
             
-    async def convert_voice(self, input_wav, output_wav, speaker_id=None, pitch_adjust=None):
+    def convert_voice(self, input_wav, output_wav, speaker_id=None, pitch_adjust=None):
         """
         转换语音
         
@@ -85,8 +163,13 @@ class VoiceConverter:
         if not os.path.exists(input_wav):
             raise FileNotFoundError(f"输入文件不存在: {input_wav}")
             
-        # 读取音频文件内容
-        with open(input_wav, 'rb') as f:
+        # 先进行 MSST 处理
+        processed_file = self.msst_processor.process_audio(input_wav, self.msst_preset)
+        if not processed_file:
+            raise RuntimeError("MSST 处理失败")
+            
+        # 读取处理后的音频文件内容
+        with open(processed_file, 'rb') as f:
             audio_data = f.read()
             
         # 准备请求数据
@@ -101,7 +184,7 @@ class VoiceConverter:
         
         try:
             # 发送请求
-            logger.info(f"开始转换音频: {input_wav}")
+            logger.info(f"开始转换音频: {processed_file}")
             logger.info(f"使用说话人ID: {speaker_id}")
             logger.info(f"音调调整: {pitch_adjust}")
             
@@ -118,12 +201,6 @@ class VoiceConverter:
                 # 保存输出文件
                 with open(output_wav, "wb") as f:
                     f.write(response.content)
-                    
-                # 使用infer接口进一步处理
-                logger.info("开始使用infer接口处理音频...")
-                success = await process_audio_with_infer(output_wav, output_wav, self.infer_url)
-                if not success:
-                    raise RuntimeError("infer接口处理失败")
                     
                 process_time = time.time() - start_time
                 logger.info(f"转换成功！输出文件已保存为: {output_wav}")
@@ -144,6 +221,10 @@ class VoiceConverter:
         except Exception as e:
             logger.error(f"发生错误: {str(e)}")
             return False
+        finally:
+            # 清理处理后的文件
+            if processed_file and os.path.exists(processed_file):
+                os.remove(processed_file)
 
 @register(
     name="so-vits-svc-api",
@@ -195,11 +276,17 @@ class SoVitsSvcPlugin(Star):
                                 "hint": "转换请求的超时时间",
                                 "default": 300
                             },
-                            "infer_url": {
-                                "description": "infer接口地址",
+                            "msst_url": {
+                                "description": "MSST-WebUI API地址",
                                 "type": "string",
-                                "hint": "infer接口地址",
-                                "default": "http://localhost:9000/infer"
+                                "hint": "MSST-WebUI 的 API 地址",
+                                "default": "http://localhost:9000"
+                            },
+                            "msst_preset": {
+                                "description": "MSST预设文件路径",
+                                "type": "string",
+                                "hint": "MSST 处理使用的预设文件路径",
+                                "default": "wav.json"
                             }
                         }
                     },
@@ -257,6 +344,8 @@ class SoVitsSvcPlugin(Star):
         status += f"当前队列大小: {health.get('queue_size', 0)}\n"
         status += f"API 版本: {health.get('version', '未知')}\n"
         status += f"API 地址: {self.converter.api_url}\n"
+        status += f"MSST API 地址: {self.converter.msst_url}\n"
+        status += f"MSST 预设: {self.converter.msst_preset}\n"
         status += f"默认说话人ID: {self.converter.default_speaker}\n"
         status += f"默认音调调整: {self.converter.default_pitch}"
         
@@ -366,7 +455,7 @@ class SoVitsSvcPlugin(Star):
             
             # 转换音频
             yield event.plain_result("正在转换音频，请稍候...")
-            success = await self.converter.convert_voice(
+            success = self.converter.convert_voice(
                 input_wav=input_file,
                 output_wav=output_file,
                 speaker_id=speaker_id,
@@ -442,59 +531,26 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
-
-
-async def process_audio_with_infer(input_file: str, output_file: str, infer_url: str = "http://localhost:9000/infer"):
-    """使用infer接口处理音频文件
-    
-    Args:
-        input_file: 输入音频文件路径
-        output_file: 输出音频文件路径
-        infer_url: infer接口地址
-    """
-    try:
-        # 读取音频文件
-        with open(input_file, 'rb') as f:
-            audio_data = f.read()
-            
-        # 准备请求数据
-        data = aiohttp.FormData()
-        data.add_field('input_file',
-                      audio_data,
-                      filename='input.wav',
-                      content_type='audio/wav')
-        data.add_field('output_format', 'wav')
-        data.add_field('extra_output_dir', 'false')
+    @command("svc_presets", alias=["预设列表"])
+    async def show_presets(self, event: AstrMessageEvent):
+        """展示当前可用的预设列表
         
-        # 发送请求
-        async with aiohttp.ClientSession() as session:
-            async with session.post(infer_url, data=data) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"处理失败: {error_text}")
-                    
-                # 获取处理后的文件
-                result = await response.json()
-                if result['status'] != 'success':
-                    raise Exception(f"处理失败: {result['message']}")
-                    
-                # 下载处理后的文件
-                output_dir = result['output_path']
-                output_files = os.listdir(output_dir)
-                if not output_files:
-                    raise Exception("未找到处理后的文件")
-                    
-                # 获取第一个输出文件
-                processed_file = os.path.join(output_dir, output_files[0])
-                with open(processed_file, 'rb') as f:
-                    processed_data = f.read()
-                    
-                # 保存到输出文件
-                with open(output_file, 'wb') as f:
-                    f.write(processed_data)
-                    
-                return True
+        用法：/svc_presets
+        """
+        try:
+            presets = self.converter.msst_processor.get_presets()
+            if not presets:
+                yield event.plain_result("获取预设列表失败，请检查 MSST-WebUI 服务是否正常运行。")
+                return
                 
-    except Exception as e:
-        logger.error(f"处理音频失败: {str(e)}")
-        return False
+            preset_info = "下面列出了可用的预设列表:\n"
+            for i, preset in enumerate(presets, 1):
+                preset_info += f"{i}. {preset}\n"
+                
+            preset_info += f"\n当前使用的预设: [{self.converter.msst_preset}]\n"
+            preset_info += "Tips: 使用 /svc_presets 可以查看所有可用的预设"
+            
+            yield event.plain_result(preset_info)
+            
+        except Exception as e:
+            yield event.plain_result(f"获取预设列表失败：{str(e)}")
