@@ -15,7 +15,7 @@ import json
 import aiohttp
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
-from astrbot.api.event.filter import command
+from astrbot.api.event.filter import command, permission_type
 from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
@@ -402,6 +402,7 @@ class SoVitsSvcPlugin(Star):
         """测试插件是否正常工作"""
         yield event.plain_result("So-Vits-SVC 插件已加载！")
 
+    @permission_type(PermissionType.ADMIN)
     @command("svc_status")
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
@@ -585,6 +586,7 @@ class SoVitsSvcPlugin(Star):
             except (OSError, IOError) as e:
                 logger.error(f"清理临时文件失败: {str(e)}")
 
+    @permission_type(PermissionType.ADMIN)
     @command("cancel_convert")
     async def cancel_convert(self, event: AstrMessageEvent):
         """取消正在进行的转换任务"""
@@ -614,6 +616,7 @@ class SoVitsSvcPlugin(Star):
 
         yield event.plain_result("没有找到可取消的转换任务")
 
+    @permission_type(PermissionType.ADMIN)
     @command("svc_speakers", alias=["说话人列表"])
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
@@ -664,6 +667,7 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
+    @permission_type(PermissionType.ADMIN)
     @command("svc_presets", alias=["预设列表"])
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""

@@ -58,6 +58,15 @@
 
 ## 使用方法
 
+### 权限说明
+- 以下命令仅限管理员使用：
+  - `/svc_status` - 检查服务状态
+  - `/svc_presets` - 查看预设列表
+  - `/svc_speakers` - 查看说话人列表
+  - `/cancel_convert` - 取消转换任务
+- 以下命令所有用户均可使用：
+  - `/convert_voice` - 转换语音
+
 ### 检查服务状态
 ```
 /svc_status
