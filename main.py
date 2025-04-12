@@ -468,6 +468,14 @@ class SoVitsSvcPlugin(Star):
         pitch_adjust = None
         song_name = None
 
+        # 检查是否是自定义命令
+        if message.startswith(self.CONVERT_VOICE_CMD):
+            args = message[len(self.CONVERT_VOICE_CMD):].strip().split()
+        elif message.startswith("转换"):
+            args = message[2:].strip().split()
+        elif message.startswith("convert"):
+            args = message[7:].strip().split()
+
         if len(args) >= 2:
             speaker_id = args[0]
             try:
