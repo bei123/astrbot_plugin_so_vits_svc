@@ -60,5 +60,42 @@
                 "default": 0
             }
         }
+    },
+    "command_config": {
+        "description": "指令配置",
+        "type": "object",
+        "hint": "自定义指令设置",
+        "items": {
+            "convert_voice": {
+                "description": "转换语音指令",
+                "type": "string",
+                "hint": "用于转换语音的指令，默认为 convert_voice",
+                "default": "convert_voice"
+            },
+            "svc_status": {
+                "description": "服务状态指令",
+                "type": "string",
+                "hint": "用于查看服务状态的指令，默认为 svc_status",
+                "default": "svc_status"
+            },
+            "svc_presets": {
+                "description": "预设列表指令",
+                "type": "string",
+                "hint": "用于查看预设列表的指令，默认为 svc_presets",
+                "default": "svc_presets"
+            },
+            "svc_speakers": {
+                "description": "说话人列表指令",
+                "type": "string",
+                "hint": "用于查看说话人列表的指令，默认为 svc_speakers",
+                "default": "svc_speakers"
+            },
+            "cancel_convert": {
+                "description": "取消转换指令",
+                "type": "string",
+                "hint": "用于取消转换任务的指令，默认为 cancel_convert",
+                "default": "cancel_convert"
+            }
+        }
     }
 } 
