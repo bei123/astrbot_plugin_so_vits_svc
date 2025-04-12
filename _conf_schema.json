@@ -1,0 +1,46 @@
+{
+    "base_setting": {
+        "description": "基础设置",
+        "type": "object",
+        "hint": "API服务器的基本配置",
+        "items": {
+            "base_url": {
+                "description": "API服务器地址",
+                "type": "string",
+                "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
+                "default": "http://localhost:1145"
+            },
+            "timeout": {
+                "description": "请求超时时间(秒)",
+                "type": "int",
+                "hint": "转换请求的超时时间",
+                "default": 300
+            }
+        }
+    },
+    "voice_config": {
+        "description": "语音转换设置",
+        "type": "object",
+        "hint": "语音转换的相关参数设置",
+        "items": {
+            "max_queue_size": {
+                "description": "最大队列大小",
+                "type": "int",
+                "hint": "超过此队列大小将拒绝新的转换请求",
+                "default": 100
+            },
+            "default_speaker": {
+                "description": "默认说话人ID",
+                "type": "string",
+                "hint": "默认使用的说话人ID",
+                "default": "0"
+            },
+            "default_pitch": {
+                "description": "默认音调调整",
+                "type": "int",
+                "hint": "默认的音调调整值，范围-12到12",
+                "default": 0
+            }
+        }
+    }
+} 
