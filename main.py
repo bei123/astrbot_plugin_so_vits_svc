@@ -233,7 +233,8 @@ class SoVitsSvcPlugin(Star):
         示例：/convert_voice 0 0
         """
         # 解析参数
-        args = event.get_args()
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []  # 去掉命令名称，只保留参数
         speaker_id = None
         pitch_adjust = None
         
@@ -303,7 +304,8 @@ class SoVitsSvcPlugin(Star):
         示例：/svc_speakers - 显示说话人列表
               /svc_speakers 1 - 设置默认说话人为1
         """
-        args = event.get_args()
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []  # 去掉命令名称，只保留参数
         
         # 获取说话人列表
         try:
