@@ -117,12 +117,12 @@ class NeteaseMusicAPI:
             if 'result' in result and 'songs' in result['result']:
                 songs = result['result']['songs']
                 return [{
-                    'id': song['id'],
-                    'name': song['name'],
-                    'artists': [artist['name'] for artist in song['artists']],
-                    'album': song['album']['name'],
-                    'picUrl': song['album']['picUrl']
-                } for song in songs]
+                    'id': song.get('id'),
+                    'name': song.get('name', '未知歌曲'),
+                    'artists': [artist.get('name', '未知歌手') for artist in song.get('artists', [])],
+                    'album': song.get('album', {}).get('name', '未知专辑'),
+                    'pic_url': song.get('album', {}).get('picUrl', '')  # 修改字段名为pic_url
+                } for song in songs if song.get('id') and song.get('name')]  # 只返回有效数据
             return []
         except json.JSONDecodeError:
             print(f"解析JSON失败，响应内容: {response_text[:100]}...")
@@ -302,7 +302,7 @@ class NeteaseMusicAPI:
                     "status": 200,
                     "id": song_id,
                     "name": first_song['name'],
-                    "pic": first_song['picUrl'],
+                    "pic": first_song.get('pic_url', ''),  # 使用新的字段名
                     "ar_name": ', '.join(first_song['artists']),
                     "al_name": first_song['album'],
                     "level": self.get_music_level(song_level),

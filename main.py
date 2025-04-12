@@ -263,27 +263,41 @@ class SoVitsSvcPlugin(Star):
         try:
             # 如果指定了歌曲名，从网易云下载
             if song_name:
-                yield event.plain_result(f"正在搜索歌曲：{song_name}...")
-                song_info = self.netease_api.get_song_with_highest_quality(song_name)
-                
-                if not song_info:
-                    yield event.plain_result(f"未找到歌曲：{song_name}")
-                    return
+                try:
+                    yield event.plain_result(f"正在搜索歌曲：{song_name}...")
+                    song_info = self.netease_api.get_song_with_highest_quality(song_name)
                     
-                yield event.plain_result(f"找到歌曲：{song_info['name']} - {song_info['ar_name']}\n"
-                                       f"音质：{song_info['level']}\n"
-                                       f"大小：{song_info['size']}\n"
-                                       f"正在下载...")
-                
-                # 下载歌曲
-                downloaded_file = self.netease_api.download_song(song_info, self.temp_dir)
-                if not downloaded_file:
-                    yield event.plain_result("下载歌曲失败！")
-                    return
+                    if not song_info:
+                        yield event.plain_result(f"未找到歌曲：{song_name}")
+                        return
                     
-                # 重命名为input_file
-                os.rename(downloaded_file, input_file)
-                
+                    if not song_info.get('url'):
+                        yield event.plain_result("无法获取歌曲下载链接，可能是版权限制。")
+                        return
+                        
+                    yield event.plain_result(f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
+                                           f"音质：{song_info.get('level', '未知音质')}\n"
+                                           f"大小：{song_info.get('size', '未知大小')}\n"
+                                           f"正在下载...")
+                    
+                    # 下载歌曲
+                    downloaded_file = self.netease_api.download_song(song_info, self.temp_dir)
+                    if not downloaded_file:
+                        yield event.plain_result("下载歌曲失败！")
+                        return
+                        
+                    # 重命名为input_file
+                    if os.path.exists(downloaded_file):
+                        os.rename(downloaded_file, input_file)
+                    else:
+                        yield event.plain_result("下载的文件不存在！")
+                        return
+                        
+                except Exception as e:
+                    logger.error(f"处理网易云音乐时出错: {str(e)}")
+                    yield event.plain_result(f"搜索/下载歌曲时出错：{str(e)}")
+                    return
+            
             # 否则检查是否有上传的音频文件
             else:
                 if not hasattr(event.message_obj, 'files') or not event.message_obj.files:
