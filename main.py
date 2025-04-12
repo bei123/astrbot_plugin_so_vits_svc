@@ -13,7 +13,7 @@ import json
 from .netease_api import NeteaseMusicAPI
 
 class MSSTProcessor:
-    def __init__(self, api_url: str = "http://localhost:9000"):
+    def __init__(self, api_url: str = "http://192.168.0.55:9000"):
         """初始化 MSST 处理器
         
         Args:
@@ -108,7 +108,7 @@ class VoiceConverter:
         self.voice_config = config.get('voice_config', {})
         
         # 基础设置
-        self.api_url = self.base_setting.get('base_url', 'http://localhost:1145')
+        self.api_url = self.base_setting.get('base_url', 'http://192.168.0.55:1145')
         self.timeout = self.base_setting.get('timeout', 300)
         
         # 语音转换设置
@@ -117,7 +117,7 @@ class VoiceConverter:
         self.default_pitch = self.voice_config.get('default_pitch', 0)
         
         # MSST 设置
-        self.msst_url = self.base_setting.get('msst_url', 'http://localhost:9000')
+        self.msst_url = self.base_setting.get('msst_url', 'http://192.168.0.55:9000')
         self.msst_preset = self.base_setting.get('msst_preset', 'wav.json')
         
         self.session = requests.Session()
