@@ -463,7 +463,7 @@ class SoVitsSvcPlugin(Star):
         """
         # 解析参数
         message = event.message_str.strip()
-        args = message.split()[1:] if message else []
+        args = []
         speaker_id = None
         pitch_adjust = None
         song_name = None
@@ -475,8 +475,17 @@ class SoVitsSvcPlugin(Star):
             args = message[2:].strip().split()
         elif message.startswith("convert"):
             args = message[7:].strip().split()
+        else:
+            # 尝试直接解析整个消息
+            args = message.split()
 
-        if len(args) >= 2:
+        # 如果参数数量不足，尝试使用默认值
+        if len(args) < 2:
+            speaker_id = self.converter.default_speaker
+            pitch_adjust = self.converter.default_pitch
+            if len(args) == 1:
+                song_name = args[0]
+        else:
             speaker_id = args[0]
             try:
                 pitch_adjust = int(args[1])
