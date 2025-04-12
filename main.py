@@ -311,13 +311,6 @@ class VoiceConverter:
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
 
-    # 定义命令字符串为类属性
-    CONVERT_VOICE_CMD = "convert_voice"
-    SVC_STATUS_CMD = "svc_status"
-    SVC_PRESETS_CMD = "svc_presets"
-    SVC_SPEAKERS_CMD = "svc_speakers"
-    CANCEL_CONVERT_CMD = "cancel_convert"
-
     def __init__(self, context: Context, config: AstrBotConfig):
         """初始化插件
 
@@ -328,87 +321,6 @@ class SoVitsSvcPlugin(Star):
         super().__init__(context)
         self.config = config
         self._init_config()
-        self.conversion_tasks = {}  # 存储正在进行的转换任务
-
-    @staticmethod
-    def config(config: AstrBotConfig) -> Dict:
-        """定义插件配置结构
-
-        Args:
-            config: AstrBot配置对象
-
-        Returns:
-            Dict: 配置结构定义
-        """
-        return {
-            "so_vits_svc_api": {
-                "description": "So-Vits-SVC API 插件配置",
-                "type": "object",
-                "items": {
-                    "base_setting": {
-                        "description": "基础设置",
-                        "type": "object",
-                        "items": {
-                            "base_url": {
-                                "description": "API服务器地址",
-                                "type": "string",
-                                "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
-                                "default": "http://localhost:1145",
-                            },
-                            "timeout": {
-                                "description": "请求超时时间(秒)",
-                                "type": "integer",
-                                "hint": "转换请求的超时时间",
-                                "default": 300,
-                            },
-                            "msst_url": {
-                                "description": "MSST-WebUI API地址",
-                                "type": "string",
-                                "hint": "MSST-WebUI 的 API 地址",
-                                "default": "http://localhost:9000",
-                            },
-                            "msst_preset": {
-                                "description": "MSST预设文件路径",
-                                "type": "string",
-                                "hint": "MSST 处理使用的预设文件路径",
-                                "default": "wav.json",
-                            },
-                            "netease_cookie": {
-                                "description": "网易云音乐Cookie",
-                                "type": "string",
-                                "hint": "用于访问网易云音乐API的Cookie",
-                                "default": "",
-                            },
-                        },
-                    },
-                    "voice_config": {
-                        "description": "语音转换设置",
-                        "type": "object",
-                        "hint": "语音转换的相关参数设置",
-                        "items": {
-                            "max_queue_size": {
-                                "description": "最大队列大小",
-                                "type": "integer",
-                                "hint": "超过此队列大小将拒绝新的转换请求",
-                                "default": 100,
-                            },
-                            "default_speaker": {
-                                "description": "默认说话人ID",
-                                "type": "string",
-                                "hint": "默认使用的说话人ID",
-                                "default": "0",
-                            },
-                            "default_pitch": {
-                                "description": "默认音调调整",
-                                "type": "integer",
-                                "hint": "默认的音调调整值，范围-12到12",
-                                "default": 0,
-                            },
-                        },
-                    },
-                },
-            }
-        }
 
     def _init_config(self) -> None:
         """初始化配置"""
@@ -416,198 +328,188 @@ class SoVitsSvcPlugin(Star):
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
 
-        # 从配置中获取命令字符串并更新类属性
+        # 从配置中获取命令字符串
         command_config = self.config.get("command_config", {})
-        self.CONVERT_VOICE_CMD = command_config.get("convert_voice", "convert_voice")
-        self.SVC_STATUS_CMD = command_config.get("svc_status", "svc_status")
-        self.SVC_PRESETS_CMD = command_config.get("svc_presets", "svc_presets")
-        self.SVC_SPEAKERS_CMD = command_config.get("svc_speakers", "svc_speakers")
-        self.CANCEL_CONVERT_CMD = command_config.get("cancel_convert", "cancel_convert")
+        self.convert_voice_cmd = command_config.get("convert_voice", "convert_voice")
+        self.svc_status_cmd = command_config.get("svc_status", "svc_status")
+        self.svc_presets_cmd = command_config.get("svc_presets", "svc_presets")
+        self.svc_speakers_cmd = command_config.get("svc_speakers", "svc_speakers")
+        self.cancel_convert_cmd = command_config.get("cancel_convert", "cancel_convert")
 
-        # 重新注册命令
-        self.register_commands()
+    def get_command_filter(self, cmd_name: str, alias: set = None) -> filter.command:
+        """获取命令过滤器
 
-    def register_commands(self):
-        """注册命令"""
-        @filter.command(self.CONVERT_VOICE_CMD, alias={"转换", "convert"})
-        async def convert_voice(self, event: AstrMessageEvent):
-            """转换语音
+        Args:
+            cmd_name: 命令名称
+            alias: 命令别名
 
-            用法：
-                1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
-                2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
-            """
-            # 解析参数
-            message = event.message_str.strip()
-            args = []
-            speaker_id = None
-            pitch_adjust = None
-            song_name = None
+        Returns:
+            命令过滤器
+        """
+        cmd = getattr(self, f"{cmd_name}_cmd")
+        return filter.command(cmd, alias=alias)
 
-            # 检查是否是自定义命令
-            if message.startswith(self.CONVERT_VOICE_CMD):
-                args = message[len(self.CONVERT_VOICE_CMD):].strip().split()
-            elif message.startswith("转换"):
-                args = message[2:].strip().split()
-            elif message.startswith("convert"):
-                args = message[7:].strip().split()
-            else:
-                # 尝试直接解析整个消息
-                args = message.split()
+    @property
+    def convert_voice(self):
+        """转换语音命令装饰器"""
+        return self.get_command_filter("convert_voice", alias={"转换", "convert"})
 
-            # 如果参数数量不足，尝试使用默认值
-            if len(args) < 2:
-                speaker_id = self.converter.default_speaker
-                pitch_adjust = self.converter.default_pitch
-                if len(args) == 1:
-                    song_name = args[0]
-            else:
-                speaker_id = args[0]
+    @convert_voice
+    async def handle_convert_voice(self, event: AstrMessageEvent):
+        """转换语音
+
+        用法：
+            1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
+            2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
+        """
+        # 解析参数
+        message = event.message_str.strip()
+        args = []
+        speaker_id = None
+        pitch_adjust = None
+        song_name = None
+
+        # 检查是否是自定义命令
+        if message.startswith(self.convert_voice_cmd):
+            args = message[len(self.convert_voice_cmd):].strip().split()
+        elif message.startswith("转换"):
+            args = message[2:].strip().split()
+        elif message.startswith("convert"):
+            args = message[7:].strip().split()
+        else:
+            # 尝试直接解析整个消息
+            args = message.split()
+
+        # 如果参数数量不足，尝试使用默认值
+        if len(args) < 2:
+            speaker_id = self.converter.default_speaker
+            pitch_adjust = self.converter.default_pitch
+            if len(args) == 1:
+                song_name = args[0]
+        else:
+            speaker_id = args[0]
+            try:
+                pitch_adjust = int(args[1])
+                if not -12 <= pitch_adjust <= 12:
+                    raise ValueError("音调调整必须在-12到12之间")
+            except ValueError as e:
+                yield event.plain_result(f"参数错误：{str(e)}")
+                return
+
+            if len(args) > 2:
+                song_name = " ".join(args[2:])
+
+        # 生成临时文件路径
+        input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
+        output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
+
+        try:
+            # 如果指定了歌曲名，从网易云下载
+            if song_name:
                 try:
-                    pitch_adjust = int(args[1])
-                    if not -12 <= pitch_adjust <= 12:
-                        raise ValueError("音调调整必须在-12到12之间")
-                except ValueError as e:
-                    yield event.plain_result(f"参数错误：{str(e)}")
+                    yield event.plain_result(f"正在搜索歌曲：{song_name}...")
+                    song_info = (
+                        self.converter.netease_api.get_song_with_highest_quality(
+                            song_name
+                        )
+                    )
+
+                    if not song_info:
+                        yield event.plain_result(f"未找到歌曲：{song_name}")
+                        return
+
+                    if not song_info.get("url"):
+                        yield event.plain_result(
+                            "无法获取歌曲下载链接，可能是版权限制。"
+                        )
+                        return
+
+                    yield event.plain_result(
+                        f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
+                        f"音质：{song_info.get('level', '未知音质')}\n"
+                        f"大小：{song_info.get('size', '未知大小')}\n"
+                        f"正在下载..."
+                    )
+
+                    downloaded_file = self.converter.netease_api.download_song(
+                        song_info, self.temp_dir
+                    )
+                    if not downloaded_file:
+                        yield event.plain_result("下载歌曲失败！")
+                        return
+
+                    if os.path.exists(downloaded_file):
+                        os.rename(downloaded_file, input_file)
+                    else:
+                        yield event.plain_result("下载的文件不存在！")
+                        return
+
+                except Exception as e:
+                    logger.error(f"处理网易云音乐时出错: {str(e)}")
+                    yield event.plain_result(f"搜索/下载歌曲时出错：{str(e)}")
                     return
 
-                if len(args) > 2:
-                    song_name = " ".join(args[2:])
-
-            # 生成临时文件路径
-            input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
-            output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
-
-            # 生成任务ID
-            task_id = str(uuid.uuid4())
-
-            try:
-                # 如果指定了歌曲名，从网易云下载
-                if song_name:
-                    try:
-                        yield event.plain_result(f"正在搜索歌曲：{song_name}...")
-                        song_info = (
-                            self.converter.netease_api.get_song_with_highest_quality(
-                                song_name
-                            )
-                        )
-
-                        if not song_info:
-                            yield event.plain_result(f"未找到歌曲：{song_name}")
-                            return
-
-                        if not song_info.get("url"):
-                            yield event.plain_result(
-                                "无法获取歌曲下载链接，可能是版权限制。"
-                            )
-                            return
-
-                        yield event.plain_result(
-                            f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
-                            f"音质：{song_info.get('level', '未知音质')}\n"
-                            f"大小：{song_info.get('size', '未知大小')}\n"
-                            f"正在下载..."
-                        )
-
-                        downloaded_file = self.converter.netease_api.download_song(
-                            song_info, self.temp_dir
-                        )
-                        if not downloaded_file:
-                            yield event.plain_result("下载歌曲失败！")
-                            return
-
-                        if os.path.exists(downloaded_file):
-                            os.rename(downloaded_file, input_file)
-                        else:
-                            yield event.plain_result("下载的文件不存在！")
-                            return
-
-                    except Exception as e:
-                        logger.error(f"处理网易云音乐时出错: {str(e)}")
-                        yield event.plain_result(f"搜索/下载歌曲时出错：{str(e)}")
-                        return
-
-                # 否则检查是否有上传的音频文件
-                else:
-                    if (
-                        not hasattr(event.message_obj, "files")
-                        or not event.message_obj.files
-                    ):
-                        yield event.plain_result(
-                            "请上传要转换的音频文件或指定歌曲名！\n"
-                            "用法：\n"
-                            "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
-                            "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐"
-                        )
-                        return
-
-                    file = event.message_obj.files[0]
-                    filename = file.name if hasattr(file, "name") else str(file)
-                    if not filename.lower().endswith((".wav", ".mp3")):
-                        yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
-                        return
-
-                    yield event.plain_result("正在处理上传的音频文件...")
-                    if hasattr(file, "url"):
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(file.url, timeout=self.converter.timeout) as response:
-                                with open(input_file, "wb") as f:
-                                    f.write(await response.read())
-                    elif hasattr(file, "path"):
-                        with open(file.path, "rb") as src, open(input_file, "wb") as dst:
-                            dst.write(src.read())
-                    else:
-                        yield event.plain_result("无法处理此类型的文件！")
-                        return
-
-                # 转换音频
-                yield event.plain_result("正在转换音频，请稍候...")
-
-                # 创建异步任务
-                task = asyncio.create_task(
-                    self.converter.convert_voice_async(
-                        input_wav=input_file,
-                        output_wav=output_file,
-                        speaker_id=speaker_id,
-                        pitch_adjust=pitch_adjust,
+            # 否则检查是否有上传的音频文件
+            else:
+                if (
+                    not hasattr(event.message_obj, "files")
+                    or not event.message_obj.files
+                ):
+                    yield event.plain_result(
+                        "请上传要转换的音频文件或指定歌曲名！\n"
+                        "用法：\n"
+                        "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
+                        "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐"
                     )
-                )
+                    return
 
-                # 存储任务
-                self.conversion_tasks[task_id] = {
-                    "task": task,
-                    "input_file": input_file,
-                    "output_file": output_file,
-                    "event": event
-                }
+                file = event.message_obj.files[0]
+                filename = file.name if hasattr(file, "name") else str(file)
+                if not filename.lower().endswith((".wav", ".mp3")):
+                    yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
+                    return
 
-                # 等待任务完成
-                success = await task
-
-                if success:
-                    yield event.plain_result("转换成功！正在发送文件...")
-                    chain = [Record.fromFileSystem(output_file)]
-                    yield event.chain_result(chain)
+                yield event.plain_result("正在处理上传的音频文件...")
+                if hasattr(file, "url"):
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(file.url, timeout=self.converter.timeout) as response:
+                            with open(input_file, "wb") as f:
+                                f.write(await response.read())
+                elif hasattr(file, "path"):
+                    with open(file.path, "rb") as src, open(input_file, "wb") as dst:
+                        dst.write(src.read())
                 else:
-                    yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
+                    yield event.plain_result("无法处理此类型的文件！")
+                    return
 
-            except Exception as e:
-                yield event.plain_result(f"转换过程中发生错误：{str(e)}")
-            finally:
-                # 清理任务
-                if task_id in self.conversion_tasks:
-                    del self.conversion_tasks[task_id]
-                # 清理临时文件
-                try:
-                    if os.path.exists(input_file):
-                        os.remove(input_file)
-                    if os.path.exists(output_file):
-                        os.remove(output_file)
-                except (OSError, IOError) as e:
-                    logger.error(f"清理临时文件失败: {str(e)}")
+            # 转换音频
+            yield event.plain_result("正在转换音频，请稍候...")
+
+            # 创建异步任务
+            task = asyncio.create_task(
+                self.converter.convert_voice_async(
+                    input_wav=input_file,
+                    output_wav=output_file,
+                    speaker_id=speaker_id,
+                    pitch_adjust=pitch_adjust,
+                )
+            )
+
+            # 等待任务完成
+            success = await task
+
+            if success:
+                yield event.plain_result("转换成功！正在发送文件...")
+                chain = [Record.fromFileSystem(output_file)]
+                yield event.chain_result(chain)
+            else:
+                yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
+
+        except Exception as e:
+            yield event.plain_result(f"转换过程中发生错误：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @filter.command(CANCEL_CONVERT_CMD, alias={"取消", "cancel"})
+    @filter.command(cancel_convert_cmd, alias={"取消", "cancel"})
     async def cancel_convert(self, event: AstrMessageEvent):
         """取消正在进行的转换任务"""
         if not self.conversion_tasks:
@@ -637,7 +539,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result("没有找到可取消的转换任务")
 
     @permission_type(PermissionType.ADMIN)
-    @filter.command(SVC_SPEAKERS_CMD, alias={"说话人", "speakers"})
+    @filter.command(svc_speakers_cmd, alias={"说话人", "speakers"})
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
 
@@ -688,7 +590,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @filter.command(SVC_PRESETS_CMD, alias={"预设", "presets"})
+    @filter.command(svc_presets_cmd, alias={"预设", "presets"})
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""
         try:
