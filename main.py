@@ -24,6 +24,7 @@ from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from astrbot.api.event import filter
 
 
 class MSSTProcessor:
