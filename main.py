@@ -417,12 +417,24 @@ class SoVitsSvcPlugin(Star):
 
         # 获取指令别名配置
         self.command_config = self.config.get("command_config", {})
-        # 更新类变量中的指令别名
-        SoVitsSvcPlugin.convert_voice_aliases = self.command_config.get("convert_voice", self.convert_voice_aliases)
-        SoVitsSvcPlugin.svc_status_aliases = self.command_config.get("svc_status", self.svc_status_aliases)
-        SoVitsSvcPlugin.svc_presets_aliases = self.command_config.get("svc_presets", self.svc_presets_aliases)
-        SoVitsSvcPlugin.svc_speakers_aliases = self.command_config.get("svc_speakers", self.svc_speakers_aliases)
-        SoVitsSvcPlugin.cancel_convert_aliases = self.command_config.get("cancel_convert", self.cancel_convert_aliases)
+        # 更新类变量中的指令别名，确保返回的是列表
+        SoVitsSvcPlugin.convert_voice_aliases = list(self.command_config.get("convert_voice", self.convert_voice_aliases))
+        SoVitsSvcPlugin.svc_status_aliases = list(self.command_config.get("svc_status", self.svc_status_aliases))
+        SoVitsSvcPlugin.svc_presets_aliases = list(self.command_config.get("svc_presets", self.svc_presets_aliases))
+        SoVitsSvcPlugin.svc_speakers_aliases = list(self.command_config.get("svc_speakers", self.svc_speakers_aliases))
+        SoVitsSvcPlugin.cancel_convert_aliases = list(self.command_config.get("cancel_convert", self.cancel_convert_aliases))
+
+        # 确保所有别名都是字符串类型
+        for aliases in [
+            SoVitsSvcPlugin.convert_voice_aliases,
+            SoVitsSvcPlugin.svc_status_aliases,
+            SoVitsSvcPlugin.svc_presets_aliases,
+            SoVitsSvcPlugin.svc_speakers_aliases,
+            SoVitsSvcPlugin.cancel_convert_aliases
+        ]:
+            for i, alias in enumerate(aliases):
+                if not isinstance(alias, str):
+                    aliases[i] = str(alias)
 
     @command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
