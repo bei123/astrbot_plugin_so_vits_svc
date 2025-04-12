@@ -491,7 +491,7 @@ class SoVitsSvcPlugin(Star):
             if success:
                 # 发送转换后的文件
                 yield event.plain_result("转换成功！正在发送文件...")
-                yield event.file_result(output_file)
+                yield event.reply_file(output_file)
             else:
                 yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
 
