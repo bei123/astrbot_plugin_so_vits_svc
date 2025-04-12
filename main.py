@@ -15,7 +15,7 @@ import json
 import aiohttp
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
-from astrbot.api.event.filter import command, permission_type
+from astrbot.api.event.filter import permission_type
 from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
@@ -24,6 +24,7 @@ from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from astrbot.api.event.filter import filter
 
 
 class MSSTProcessor:
@@ -415,21 +416,21 @@ class SoVitsSvcPlugin(Star):
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
 
-        # 从配置中获取命令字符串
+        # 从配置中获取命令字符串并更新类属性
         command_config = self.config.get("command_config", {})
-        self.CONVERT_VOICE_CMD = command_config.get("convert_voice", self.CONVERT_VOICE_CMD)
-        self.SVC_STATUS_CMD = command_config.get("svc_status", self.SVC_STATUS_CMD)
-        self.SVC_PRESETS_CMD = command_config.get("svc_presets", self.SVC_PRESETS_CMD)
-        self.SVC_SPEAKERS_CMD = command_config.get("svc_speakers", self.SVC_SPEAKERS_CMD)
-        self.CANCEL_CONVERT_CMD = command_config.get("cancel_convert", self.CANCEL_CONVERT_CMD)
+        SoVitsSvcPlugin.CONVERT_VOICE_CMD = command_config.get("convert_voice", SoVitsSvcPlugin.CONVERT_VOICE_CMD)
+        SoVitsSvcPlugin.SVC_STATUS_CMD = command_config.get("svc_status", SoVitsSvcPlugin.SVC_STATUS_CMD)
+        SoVitsSvcPlugin.SVC_PRESETS_CMD = command_config.get("svc_presets", SoVitsSvcPlugin.SVC_PRESETS_CMD)
+        SoVitsSvcPlugin.SVC_SPEAKERS_CMD = command_config.get("svc_speakers", SoVitsSvcPlugin.SVC_SPEAKERS_CMD)
+        SoVitsSvcPlugin.CANCEL_CONVERT_CMD = command_config.get("cancel_convert", SoVitsSvcPlugin.CANCEL_CONVERT_CMD)
 
-    @command("helloworld")
+    @filter.command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
         """测试插件是否正常工作"""
         yield event.plain_result("So-Vits-SVC 插件已加载！")
 
     @permission_type(PermissionType.ADMIN)
-    @command(SVC_STATUS_CMD)
+    @filter.command(SVC_STATUS_CMD, alias={"状态", "status"})
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
         health = self.converter.check_health()
@@ -452,7 +453,7 @@ class SoVitsSvcPlugin(Star):
 
         yield event.plain_result(status)
 
-    @command(CONVERT_VOICE_CMD)
+    @filter.command(CONVERT_VOICE_CMD, alias={"转换", "convert"})
     async def convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
@@ -613,7 +614,7 @@ class SoVitsSvcPlugin(Star):
                 logger.error(f"清理临时文件失败: {str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command(CANCEL_CONVERT_CMD)
+    @filter.command(CANCEL_CONVERT_CMD, alias={"取消", "cancel"})
     async def cancel_convert(self, event: AstrMessageEvent):
         """取消正在进行的转换任务"""
         if not self.conversion_tasks:
@@ -643,7 +644,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result("没有找到可取消的转换任务")
 
     @permission_type(PermissionType.ADMIN)
-    @command(SVC_SPEAKERS_CMD)
+    @filter.command(SVC_SPEAKERS_CMD, alias={"说话人", "speakers"})
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
 
@@ -694,7 +695,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command(SVC_PRESETS_CMD)
+    @filter.command(SVC_PRESETS_CMD, alias={"预设", "presets"})
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""
         try:
