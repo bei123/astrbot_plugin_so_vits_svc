@@ -15,7 +15,7 @@ import json
 import aiohttp
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
-from astrbot.api.event.filter import permission_type
+from astrbot.api.event.filter import command, permission_type
 from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
@@ -24,7 +24,6 @@ from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from astrbot.api.event import filter
 
 
 class MSSTProcessor:
@@ -321,6 +320,87 @@ class SoVitsSvcPlugin(Star):
         super().__init__(context)
         self.config = config
         self._init_config()
+        self.conversion_tasks = {}  # 存储正在进行的转换任务
+
+    @staticmethod
+    def config(config: AstrBotConfig) -> Dict:
+        """定义插件配置结构
+
+        Args:
+            config: AstrBot配置对象
+
+        Returns:
+            Dict: 配置结构定义
+        """
+        return {
+            "so_vits_svc_api": {
+                "description": "So-Vits-SVC API 插件配置",
+                "type": "object",
+                "items": {
+                    "base_setting": {
+                        "description": "基础设置",
+                        "type": "object",
+                        "items": {
+                            "base_url": {
+                                "description": "API服务器地址",
+                                "type": "string",
+                                "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
+                                "default": "http://localhost:1145",
+                            },
+                            "timeout": {
+                                "description": "请求超时时间(秒)",
+                                "type": "integer",
+                                "hint": "转换请求的超时时间",
+                                "default": 300,
+                            },
+                            "msst_url": {
+                                "description": "MSST-WebUI API地址",
+                                "type": "string",
+                                "hint": "MSST-WebUI 的 API 地址",
+                                "default": "http://localhost:9000",
+                            },
+                            "msst_preset": {
+                                "description": "MSST预设文件路径",
+                                "type": "string",
+                                "hint": "MSST 处理使用的预设文件路径",
+                                "default": "wav.json",
+                            },
+                            "netease_cookie": {
+                                "description": "网易云音乐Cookie",
+                                "type": "string",
+                                "hint": "用于访问网易云音乐API的Cookie",
+                                "default": "",
+                            },
+                        },
+                    },
+                    "voice_config": {
+                        "description": "语音转换设置",
+                        "type": "object",
+                        "hint": "语音转换的相关参数设置",
+                        "items": {
+                            "max_queue_size": {
+                                "description": "最大队列大小",
+                                "type": "integer",
+                                "hint": "超过此队列大小将拒绝新的转换请求",
+                                "default": 100,
+                            },
+                            "default_speaker": {
+                                "description": "默认说话人ID",
+                                "type": "string",
+                                "hint": "默认使用的说话人ID",
+                                "default": "0",
+                            },
+                            "default_pitch": {
+                                "description": "默认音调调整",
+                                "type": "integer",
+                                "hint": "默认的音调调整值，范围-12到12",
+                                "default": 0,
+                            },
+                        },
+                    },
+                },
+            }
+        }
 
     def _init_config(self) -> None:
         """初始化配置"""
@@ -328,30 +408,45 @@ class SoVitsSvcPlugin(Star):
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
 
-        # 从配置中获取命令字符串
-        command_config = self.config.get("command_config", {})
-        self.convert_voice_cmd = command_config.get("convert_voice", "convert_voice")
-        self.svc_status_cmd = command_config.get("svc_status", "svc_status")
-        self.svc_presets_cmd = command_config.get("svc_presets", "svc_presets")
-        self.svc_speakers_cmd = command_config.get("svc_speakers", "svc_speakers")
-        self.cancel_convert_cmd = command_config.get("cancel_convert", "cancel_convert")
+        # 获取指令别名配置
+        self.command_config = self.config.get("command_config", {})
+        self.convert_voice_aliases = self.command_config.get("convert_voice", ["convert_voice", "转换语音", "语音转换"])
+        self.svc_status_aliases = self.command_config.get("svc_status", ["svc_status", "服务状态", "状态"])
+        self.svc_presets_aliases = self.command_config.get("svc_presets", ["svc_presets", "预设列表", "预设"])
+        self.svc_speakers_aliases = self.command_config.get("svc_speakers", ["svc_speakers", "说话人列表", "说话人"])
+        self.cancel_convert_aliases = self.command_config.get("cancel_convert", ["cancel_convert", "取消转换", "取消"])
 
-    def get_command_filter(self, cmd_name: str, alias: set = None) -> filter.command:
-        """获取命令过滤器
+    @command("helloworld")
+    async def helloworld(self, event: AstrMessageEvent):
+        """测试插件是否正常工作"""
+        yield event.plain_result("So-Vits-SVC 插件已加载！")
 
-        Args:
-            cmd_name: 命令名称
-            alias: 命令别名
+    @permission_type(PermissionType.ADMIN)
+    @command(*self.svc_status_aliases)
+    async def check_status(self, event: AstrMessageEvent):
+        """检查服务状态"""
+        health = self.converter.check_health()
+        if not health:
+            yield event.plain_result(
+                "服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。"
+            )
+            return
 
-        Returns:
-            命令过滤器
-        """
-        cmd = getattr(self, f"{cmd_name}_cmd")
-        return filter.command(cmd, alias=alias)
+        status = "✅ 服务正常运行\n"
+        status += (
+            f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载'}\n"
+        )
+        status += f"当前队列大小: {health.get('queue_size', 0)}\n"
+        status += f"So-Vits-SVC API 地址: {self.converter.api_url}\n"
+        status += f"MSST-WebUI API 地址: {self.converter.msst_url}\n"
+        status += f"MSST 预设: {self.converter.msst_preset}\n"
+        status += f"默认说话人ID: {self.converter.default_speaker}\n"
+        status += f"默认音调调整: {self.converter.default_pitch}"
 
+        yield event.plain_result(status)
 
-    @filter.command("convert_voice", alias={"转换", "convert"})
-    async def handle_convert_voice(self, event: AstrMessageEvent):
+    @command(*self.convert_voice_aliases)
+    async def convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
         用法：
@@ -360,29 +455,12 @@ class SoVitsSvcPlugin(Star):
         """
         # 解析参数
         message = event.message_str.strip()
-        args = []
+        args = message.split()[1:] if message else []
         speaker_id = None
         pitch_adjust = None
         song_name = None
 
-        # 检查是否是自定义命令
-        if message.startswith(self.convert_voice_cmd):
-            args = message[len(self.convert_voice_cmd):].strip().split()
-        elif message.startswith("转换"):
-            args = message[2:].strip().split()
-        elif message.startswith("convert"):
-            args = message[7:].strip().split()
-        else:
-            # 尝试直接解析整个消息
-            args = message.split()
-
-        # 如果参数数量不足，尝试使用默认值
-        if len(args) < 2:
-            speaker_id = self.converter.default_speaker
-            pitch_adjust = self.converter.default_pitch
-            if len(args) == 1:
-                song_name = args[0]
-        else:
+        if len(args) >= 2:
             speaker_id = args[0]
             try:
                 pitch_adjust = int(args[1])
@@ -398,6 +476,9 @@ class SoVitsSvcPlugin(Star):
         # 生成临时文件路径
         input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
         output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
+
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
 
         try:
             # 如果指定了歌曲名，从网易云下载
@@ -491,6 +572,14 @@ class SoVitsSvcPlugin(Star):
                 )
             )
 
+            # 存储任务
+            self.conversion_tasks[task_id] = {
+                "task": task,
+                "input_file": input_file,
+                "output_file": output_file,
+                "event": event
+            }
+
             # 等待任务完成
             success = await task
 
@@ -503,9 +592,21 @@ class SoVitsSvcPlugin(Star):
 
         except Exception as e:
             yield event.plain_result(f"转换过程中发生错误：{str(e)}")
+        finally:
+            # 清理任务
+            if task_id in self.conversion_tasks:
+                del self.conversion_tasks[task_id]
+            # 清理临时文件
+            try:
+                if os.path.exists(input_file):
+                    os.remove(input_file)
+                if os.path.exists(output_file):
+                    os.remove(output_file)
+            except (OSError, IOError) as e:
+                logger.error(f"清理临时文件失败: {str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @filter.command(cancel_convert_cmd, alias={"取消", "cancel"})
+    @command(*self.cancel_convert_aliases)
     async def cancel_convert(self, event: AstrMessageEvent):
         """取消正在进行的转换任务"""
         if not self.conversion_tasks:
@@ -535,7 +636,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result("没有找到可取消的转换任务")
 
     @permission_type(PermissionType.ADMIN)
-    @filter.command(svc_speakers_cmd, alias={"说话人", "speakers"})
+    @command(*self.svc_speakers_aliases)
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
 
@@ -586,7 +687,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @filter.command(svc_presets_cmd, alias={"预设", "presets"})
+    @command(*self.svc_presets_aliases)
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""
         try:

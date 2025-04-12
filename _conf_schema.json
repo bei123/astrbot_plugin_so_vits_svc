@@ -64,37 +64,37 @@
     "command_config": {
         "description": "指令配置",
         "type": "object",
-        "hint": "自定义指令设置",
+        "hint": "指令相关的配置",
         "items": {
             "convert_voice": {
-                "description": "转换语音指令",
-                "type": "string",
-                "hint": "用于转换语音的指令，默认为 convert_voice",
-                "default": "牢剑唱"
+                "description": "语音转换指令",
+                "type": "array",
+                "hint": "语音转换指令的别名列表",
+                "default": ["convert_voice", "转换语音", "语音转换"]
             },
             "svc_status": {
                 "description": "服务状态指令",
-                "type": "string",
-                "hint": "用于查看服务状态的指令，默认为 svc_status",
-                "default": "svc_status"
+                "type": "array",
+                "hint": "服务状态指令的别名列表",
+                "default": ["svc_status", "服务状态", "状态"]
             },
             "svc_presets": {
                 "description": "预设列表指令",
-                "type": "string",
-                "hint": "用于查看预设列表的指令，默认为 svc_presets",
-                "default": "svc_presets"
+                "type": "array",
+                "hint": "预设列表指令的别名列表",
+                "default": ["svc_presets", "预设列表", "预设"]
             },
             "svc_speakers": {
                 "description": "说话人列表指令",
-                "type": "string",
-                "hint": "用于查看说话人列表的指令，默认为 svc_speakers",
-                "default": "svc_speakers"
+                "type": "array",
+                "hint": "说话人列表指令的别名列表",
+                "default": ["svc_speakers", "说话人列表", "说话人"]
             },
             "cancel_convert": {
                 "description": "取消转换指令",
-                "type": "string",
-                "hint": "用于取消转换任务的指令，默认为 cancel_convert",
-                "default": "cancel_convert"
+                "type": "array",
+                "hint": "取消转换指令的别名列表",
+                "default": ["cancel_convert", "取消转换", "取消"]
             }
         }
     }
