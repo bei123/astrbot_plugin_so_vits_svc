@@ -10,6 +10,7 @@ import time
 import requests
 import uuid
 import json
+from .netease_api import NeteaseMusicAPI
 
 class VoiceConverter:
     def __init__(self, config: Dict):
@@ -129,6 +130,7 @@ class SoVitsSvcPlugin(Star):
         super().__init__(context)
         self.config = config
         self._init_config()
+        self.netease_api = NeteaseMusicAPI()
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -226,14 +228,19 @@ class SoVitsSvcPlugin(Star):
     async def convert_voice(self, event: AstrMessageEvent):
         """
         转换语音
-        用法：/convert_voice [说话人ID] [音调调整(-12到12)]
-        示例：/convert_voice 0 0
+        用法：
+            1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
+            2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
+        示例：
+            /convert_voice 0 0 - 使用上传的音频文件
+            /convert_voice 0 0 起风了 - 搜索并转换"起风了"
         """
         # 解析参数
         message = event.message_str.strip()
         args = message.split()[1:] if message else []  # 去掉命令名称，只保留参数
         speaker_id = None
         pitch_adjust = None
+        song_name = None
         
         if len(args) >= 2:
             speaker_id = args[0]
@@ -244,36 +251,66 @@ class SoVitsSvcPlugin(Star):
             except ValueError as e:
                 yield event.plain_result(f"参数错误：{str(e)}")
                 return
+            
+            # 如果有第三个参数，则为歌曲名
+            if len(args) > 2:
+                song_name = " ".join(args[2:])
 
-        # 检查是否有音频文件
-        if not hasattr(event.message_obj, 'files') or not event.message_obj.files:
-            yield event.plain_result("请上传要转换的音频文件！")
-            return
-
-        file = event.message_obj.files[0]
-        filename = file.name if hasattr(file, 'name') else str(file)
-        if not filename.lower().endswith(('.wav', '.mp3')):
-            yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
-            return
-
-        # 下载音频文件
+        # 生成临时文件路径
         input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
         output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
 
         try:
-            # 下载文件
-            yield event.plain_result("正在下载音频文件...")
-            # 这里需要根据平台适配器的不同来处理文件下载
-            if hasattr(file, 'url'):
-                response = requests.get(file.url, timeout=self.converter.timeout)
-                with open(input_file, 'wb') as f:
-                    f.write(response.content)
-            elif hasattr(file, 'path'):
-                with open(file.path, 'rb') as src, open(input_file, 'wb') as dst:
-                    dst.write(src.read())
+            # 如果指定了歌曲名，从网易云下载
+            if song_name:
+                yield event.plain_result(f"正在搜索歌曲：{song_name}...")
+                song_info = self.netease_api.get_song_with_highest_quality(song_name)
+                
+                if not song_info:
+                    yield event.plain_result(f"未找到歌曲：{song_name}")
+                    return
+                    
+                yield event.plain_result(f"找到歌曲：{song_info['name']} - {song_info['ar_name']}\n"
+                                       f"音质：{song_info['level']}\n"
+                                       f"大小：{song_info['size']}\n"
+                                       f"正在下载...")
+                
+                # 下载歌曲
+                downloaded_file = self.netease_api.download_song(song_info, self.temp_dir)
+                if not downloaded_file:
+                    yield event.plain_result("下载歌曲失败！")
+                    return
+                    
+                # 重命名为input_file
+                os.rename(downloaded_file, input_file)
+                
+            # 否则检查是否有上传的音频文件
             else:
-                yield event.plain_result("无法处理此类型的文件！")
-                return
+                if not hasattr(event.message_obj, 'files') or not event.message_obj.files:
+                    yield event.plain_result("请上传要转换的音频文件或指定歌曲名！\n"
+                                           "用法：\n"
+                                           "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
+                                           "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐")
+                    return
+
+                file = event.message_obj.files[0]
+                filename = file.name if hasattr(file, 'name') else str(file)
+                if not filename.lower().endswith(('.wav', '.mp3')):
+                    yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
+                    return
+
+                # 下载上传的文件
+                yield event.plain_result("正在处理上传的音频文件...")
+                if hasattr(file, 'url'):
+                    response = requests.get(file.url, timeout=self.converter.timeout)
+                    with open(input_file, 'wb') as f:
+                        f.write(response.content)
+                elif hasattr(file, 'path'):
+                    with open(file.path, 'rb') as src, open(input_file, 'wb') as dst:
+                        dst.write(src.read())
+                else:
+                    yield event.plain_result("无法处理此类型的文件！")
+                    return
             
             # 转换音频
             yield event.plain_result("正在转换音频，请稍候...")
