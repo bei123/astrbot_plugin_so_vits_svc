@@ -310,13 +310,6 @@ class VoiceConverter:
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
 
-    # 类变量，用于存储指令别名
-    convert_voice_aliases = ["convert_voice", "转换语音", "语音转换"]
-    svc_status_aliases = ["svc_status", "服务状态", "状态"]
-    svc_presets_aliases = ["svc_presets", "预设列表", "预设"]
-    svc_speakers_aliases = ["svc_speakers", "说话人列表", "说话人"]
-    cancel_convert_aliases = ["cancel_convert", "取消转换", "取消"]
-
     def __init__(self, context: Context, config: AstrBotConfig):
         """初始化插件
 
@@ -414,27 +407,14 @@ class SoVitsSvcPlugin(Star):
         self.converter = VoiceConverter(self.config)
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
-
+        
         # 获取指令别名配置
         self.command_config = self.config.get("command_config", {})
-        # 更新类变量中的指令别名，确保返回的是列表
-        SoVitsSvcPlugin.convert_voice_aliases = list(self.command_config.get("convert_voice", self.convert_voice_aliases))
-        SoVitsSvcPlugin.svc_status_aliases = list(self.command_config.get("svc_status", self.svc_status_aliases))
-        SoVitsSvcPlugin.svc_presets_aliases = list(self.command_config.get("svc_presets", self.svc_presets_aliases))
-        SoVitsSvcPlugin.svc_speakers_aliases = list(self.command_config.get("svc_speakers", self.svc_speakers_aliases))
-        SoVitsSvcPlugin.cancel_convert_aliases = list(self.command_config.get("cancel_convert", self.cancel_convert_aliases))
-
-        # 确保所有别名都是字符串类型
-        for aliases in [
-            SoVitsSvcPlugin.convert_voice_aliases,
-            SoVitsSvcPlugin.svc_status_aliases,
-            SoVitsSvcPlugin.svc_presets_aliases,
-            SoVitsSvcPlugin.svc_speakers_aliases,
-            SoVitsSvcPlugin.cancel_convert_aliases
-        ]:
-            for i, alias in enumerate(aliases):
-                if not isinstance(alias, str):
-                    aliases[i] = str(alias)
+        self.convert_voice_alias = self.command_config.get("convert_voice", "转换语音")
+        self.svc_status_alias = self.command_config.get("svc_status", "状态")
+        self.svc_presets_alias = self.command_config.get("svc_presets", "预设")
+        self.svc_speakers_alias = self.command_config.get("svc_speakers", "说话人")
+        self.cancel_convert_alias = self.command_config.get("cancel_convert", "取消")
 
     @command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
@@ -442,20 +422,16 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result("So-Vits-SVC 插件已加载！")
 
     @permission_type(PermissionType.ADMIN)
-    @command(*svc_status_aliases)
+    @command("svc_status", alias=lambda self: self.svc_status_alias)
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
         health = self.converter.check_health()
         if not health:
-            yield event.plain_result(
-                "服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。"
-            )
+            yield event.plain_result("服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。")
             return
 
         status = "✅ 服务正常运行\n"
-        status += (
-            f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载'}\n"
-        )
+        status += f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载'}\n"
         status += f"当前队列大小: {health.get('queue_size', 0)}\n"
         status += f"So-Vits-SVC API 地址: {self.converter.api_url}\n"
         status += f"MSST-WebUI API 地址: {self.converter.msst_url}\n"
@@ -465,7 +441,7 @@ class SoVitsSvcPlugin(Star):
 
         yield event.plain_result(status)
 
-    @command(*convert_voice_aliases)
+    @command("convert_voice", alias=lambda self: self.convert_voice_alias)
     async def convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
@@ -626,7 +602,7 @@ class SoVitsSvcPlugin(Star):
                 logger.error(f"清理临时文件失败: {str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command(*cancel_convert_aliases)
+    @command("cancel_convert", alias=lambda self: self.cancel_convert_alias)
     async def cancel_convert(self, event: AstrMessageEvent):
         """取消正在进行的转换任务"""
         if not self.conversion_tasks:
@@ -656,7 +632,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result("没有找到可取消的转换任务")
 
     @permission_type(PermissionType.ADMIN)
-    @command(*svc_speakers_aliases)
+    @command("svc_speakers", alias=lambda self: self.svc_speakers_alias)
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
 
@@ -707,7 +683,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command(*svc_presets_aliases)
+    @command("svc_presets", alias=lambda self: self.svc_presets_alias)
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""
         try:
