@@ -1,20 +1,30 @@
-from typing import Optional, Dict
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+So-Vits-SVC API 插件
+提供语音转换、MSST音频处理和网易云音乐下载功能
+"""
+
+from typing import Optional, Dict, List, Any
+import os
+import time
+import uuid
+import json
+import requests
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
 from astrbot.api.event.filter import command
 from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
-import os
-import time
-import requests
-import uuid
-import json
-from .netease_api import NeteaseMusicAPI
 from astrbot.core.message.components import Record
+from .netease_api import NeteaseMusicAPI
 
 class MSSTProcessor:
-    def __init__(self, api_url: str = "http://192.168.0.55:9000"):
+    """MSST 音频处理器"""
+    
+    def __init__(self, api_url: str = "http://localhost:9000"):
         """初始化 MSST 处理器
         
         Args:
@@ -24,7 +34,7 @@ class MSSTProcessor:
         self.session = requests.Session()
         self.available_presets = self.get_presets()
         
-    def get_presets(self) -> list:
+    def get_presets(self) -> List[str]:
         """获取可用的预设列表
         
         Returns:
@@ -51,16 +61,13 @@ class MSSTProcessor:
         Returns:
             可用的预设文件名
         """
-        # 如果首选预设可用，直接返回
         if preferred_preset in self.available_presets:
             return os.path.join("presets", preferred_preset)
             
-        # 否则尝试查找其他可用的预设
         for preset in self.available_presets:
             if preset.endswith('.json'):
                 return os.path.join("presets", preset)
                 
-        # 如果没有可用的预设，返回首选预设（让 API 报错）
         return os.path.join("presets", preferred_preset)
         
     def process_audio(self, input_file: str, preset_name: str = "wav.json") -> Optional[str]:
@@ -68,21 +75,18 @@ class MSSTProcessor:
         
         Args:
             input_file: 输入音频文件路径
-            preset_name: 预设文件名，默认为 wav.json
+            preset_name: 预设文件名
             
         Returns:
-            处理后的音频文件路径，如果失败则返回 None
+            处理后的音频文件路径，失败返回 None
         """
         try:
-            # 查找可用的预设
             available_preset = self.find_available_preset(preset_name)
             logger.info(f"使用预设文件: {available_preset}")
             
-            # 读取音频文件
             with open(input_file, 'rb') as f:
                 audio_data = f.read()
                 
-            # 准备请求数据
             files = {
                 'input_file': ('input.wav', audio_data, 'audio/wav')
             }
@@ -92,7 +96,6 @@ class MSSTProcessor:
                 'extra_output_dir': 'false'
             }
             
-            # 发送请求
             response = self.session.post(
                 f"{self.api_url}/infer/local",
                 files=files,
@@ -102,17 +105,17 @@ class MSSTProcessor:
             if response.status_code == 200:
                 result = response.json()
                 if result['status'] == 'success':
-                    # 获取输出文件列表
                     output_files = self.session.get(f"{self.api_url}/list_outputs").json()
                     if output_files and output_files['files']:
-                        # 下载第一个输出文件
                         output_file = output_files['files'][0]
                         download_url = f"{self.api_url}/download/{output_file['name']}"
                         download_response = self.session.get(download_url)
                         
                         if download_response.status_code == 200:
-                            # 保存处理后的文件
-                            output_path = os.path.join(os.path.dirname(input_file), f"processed_{os.path.basename(input_file)}")
+                            output_path = os.path.join(
+                                os.path.dirname(input_file),
+                                f"processed_{os.path.basename(input_file)}"
+                            )
                             with open(output_path, 'wb') as f:
                                 f.write(download_response.content)
                             return output_path
@@ -134,25 +137,31 @@ class VoiceConverter:
             config: 插件配置字典
         """
         self.config = config or {}
-        self.msst_url = self.config.get('base_setting', {}).get('msst_url', 'http://localhost:9000')
-        self.api_url = self.config.get('base_setting', {}).get('base_url', 'http://localhost:1145')
-        self.msst_preset = self.config.get('base_setting', {}).get('msst_preset', 'wav.json')
-        self.msst_processor = MSSTProcessor(self.msst_url)
-        self.netease_api = NeteaseMusicAPI(self.config)
-        
-        # 基础设置
         self.base_setting = self.config.get('base_setting', {})
         self.voice_config = self.config.get('voice_config', {})
+        
+        # API 设置
+        self.api_url = self.base_setting.get('base_url', 'http://localhost:1145')
+        self.msst_url = self.base_setting.get('msst_url', 'http://localhost:9000')
+        self.msst_preset = self.base_setting.get('msst_preset', 'wav.json')
+        self.timeout = self.base_setting.get('timeout', 300)
         
         # 语音转换设置
         self.max_queue_size = self.voice_config.get('max_queue_size', 100)
         self.default_speaker = self.voice_config.get('default_speaker', '0')
         self.default_pitch = self.voice_config.get('default_pitch', 0)
         
+        # 初始化组件
         self.session = requests.Session()
+        self.msst_processor = MSSTProcessor(self.msst_url)
+        self.netease_api = NeteaseMusicAPI(self.config)
             
-    def check_health(self):
-        """检查服务健康状态"""
+    def check_health(self) -> Optional[Dict]:
+        """检查服务健康状态
+        
+        Returns:
+            健康状态信息字典，失败返回 None
+        """
         try:
             response = self.session.get(f"{self.api_url}/health")
             return response.json()
@@ -160,15 +169,23 @@ class VoiceConverter:
             logger.error(f"健康检查失败: {str(e)}")
             return None
             
-    def convert_voice(self, input_wav, output_wav, speaker_id=None, pitch_adjust=None):
-        """
-        转换语音
+    def convert_voice(
+        self,
+        input_wav: str,
+        output_wav: str,
+        speaker_id: Optional[str] = None,
+        pitch_adjust: Optional[int] = None
+    ) -> bool:
+        """转换语音
         
-        参数:
+        Args:
             input_wav: 输入音频文件路径
             output_wav: 输出音频文件路径
-            speaker_id: 说话人ID，如果为None则使用默认值
-            pitch_adjust: 音调调整，如果为None则使用默认值
+            speaker_id: 说话人ID，默认使用配置值
+            pitch_adjust: 音调调整，默认使用配置值
+            
+        Returns:
+            转换是否成功
         """
         # 使用默认值
         if speaker_id is None:
@@ -196,21 +213,21 @@ class VoiceConverter:
         if not processed_file:
             raise RuntimeError("MSST 处理失败")
             
-        # 读取处理后的音频文件内容
-        with open(processed_file, 'rb') as f:
-            audio_data = f.read()
-            
-        # 准备请求数据
-        files = {
-            'audio': ('input.wav', audio_data, 'audio/wav')
-        }
-        data = {
-            "tran": str(pitch_adjust),
-            "spk": str(speaker_id),
-            "wav_format": "wav"
-        }
-        
         try:
+            # 读取处理后的音频文件
+            with open(processed_file, 'rb') as f:
+                audio_data = f.read()
+                
+            # 准备请求数据
+            files = {
+                'audio': ('input.wav', audio_data, 'audio/wav')
+            }
+            data = {
+                "tran": str(pitch_adjust),
+                "spk": str(speaker_id),
+                "wav_format": "wav"
+            }
+            
             # 发送请求
             logger.info(f"开始转换音频: {processed_file}")
             logger.info(f"使用说话人ID: {speaker_id}")
@@ -221,12 +238,11 @@ class VoiceConverter:
                 f"{self.api_url}/wav2wav",
                 data=data,
                 files=files,
-                timeout=self.base_setting.get('timeout', 300)
+                timeout=self.timeout
             )
             
-            # 检查响应
+            # 处理响应
             if response.status_code == 200:
-                # 保存输出文件
                 with open(output_wav, "wb") as f:
                     f.write(response.content)
                     
@@ -261,6 +277,8 @@ class VoiceConverter:
     version="1.0.0"
 )
 class SoVitsSvcPlugin(Star):
+    """So-Vits-SVC API 插件主类"""
+    
     def __init__(self, context: Context, config: AstrBotConfig):
         """初始化插件
         
@@ -295,7 +313,7 @@ class SoVitsSvcPlugin(Star):
                                 "description": "API服务器地址",
                                 "type": "string",
                                 "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
-                                "default": "http://192.168.0.55:1145"
+                                "default": "http://localhost:1145"
                             },
                             "timeout": {
                                 "description": "请求超时时间(秒)",
@@ -307,13 +325,19 @@ class SoVitsSvcPlugin(Star):
                                 "description": "MSST-WebUI API地址",
                                 "type": "string",
                                 "hint": "MSST-WebUI 的 API 地址",
-                                "default": "http://192.168.0.55:9000"
+                                "default": "http://localhost:9000"
                             },
                             "msst_preset": {
                                 "description": "MSST预设文件路径",
                                 "type": "string",
                                 "hint": "MSST 处理使用的预设文件路径",
                                 "default": "wav.json"
+                            },
+                            "netease_cookie": {
+                                "description": "网易云音乐Cookie",
+                                "type": "string",
+                                "hint": "用于访问网易云音乐API的Cookie",
+                                "default": ""
                             }
                         }
                     },
@@ -348,7 +372,6 @@ class SoVitsSvcPlugin(Star):
         
     def _init_config(self) -> None:
         """初始化配置"""
-        # 创建转换器实例
         self.converter = VoiceConverter(self.config)
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -379,18 +402,15 @@ class SoVitsSvcPlugin(Star):
 
     @command("convert_voice")
     async def convert_voice(self, event: AstrMessageEvent):
-        """
-        转换语音
+        """转换语音
+        
         用法：
             1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
             2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
-        示例：
-            /convert_voice 0 0 - 使用上传的音频文件
-            /convert_voice 0 0 起风了 - 搜索并转换"起风了"
         """
         # 解析参数
         message = event.message_str.strip()
-        args = message.split()[1:] if message else []  # 去掉命令名称，只保留参数
+        args = message.split()[1:] if message else []
         speaker_id = None
         pitch_adjust = None
         song_name = None
@@ -405,7 +425,6 @@ class SoVitsSvcPlugin(Star):
                 yield event.plain_result(f"参数错误：{str(e)}")
                 return
             
-            # 如果有第三个参数，则为歌曲名
             if len(args) > 2:
                 song_name = " ".join(args[2:])
 
@@ -428,18 +447,18 @@ class SoVitsSvcPlugin(Star):
                         yield event.plain_result("无法获取歌曲下载链接，可能是版权限制。")
                         return
                         
-                    yield event.plain_result(f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
-                                           f"音质：{song_info.get('level', '未知音质')}\n"
-                                           f"大小：{song_info.get('size', '未知大小')}\n"
-                                           f"正在下载...")
+                    yield event.plain_result(
+                        f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
+                        f"音质：{song_info.get('level', '未知音质')}\n"
+                        f"大小：{song_info.get('size', '未知大小')}\n"
+                        f"正在下载..."
+                    )
                     
-                    # 下载歌曲
                     downloaded_file = self.converter.netease_api.download_song(song_info, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载歌曲失败！")
                         return
                         
-                    # 重命名为input_file
                     if os.path.exists(downloaded_file):
                         os.rename(downloaded_file, input_file)
                     else:
@@ -454,10 +473,12 @@ class SoVitsSvcPlugin(Star):
             # 否则检查是否有上传的音频文件
             else:
                 if not hasattr(event.message_obj, 'files') or not event.message_obj.files:
-                    yield event.plain_result("请上传要转换的音频文件或指定歌曲名！\n"
-                                           "用法：\n"
-                                           "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
-                                           "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐")
+                    yield event.plain_result(
+                        "请上传要转换的音频文件或指定歌曲名！\n"
+                        "用法：\n"
+                        "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
+                        "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐"
+                    )
                     return
 
                 file = event.message_obj.files[0]
@@ -466,10 +487,9 @@ class SoVitsSvcPlugin(Star):
                     yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
                     return
 
-                # 下载上传的文件
                 yield event.plain_result("正在处理上传的音频文件...")
                 if hasattr(file, 'url'):
-                    response = requests.get(file.url, timeout=self.converter.base_setting.get('timeout', 300))
+                    response = requests.get(file.url, timeout=self.converter.timeout)
                     with open(input_file, 'wb') as f:
                         f.write(response.content)
                 elif hasattr(file, 'path'):
@@ -489,7 +509,6 @@ class SoVitsSvcPlugin(Star):
             )
 
             if success:
-                # 发送转换后的文件
                 yield event.plain_result("转换成功！正在发送文件...")
                 chain = [Record.fromFileSystem(output_file)]
                 yield event.chain_result(chain)
@@ -518,11 +537,13 @@ class SoVitsSvcPlugin(Star):
               /svc_speakers 1 - 设置默认说话人为1
         """
         message = event.message_str.strip()
-        args = message.split()[1:] if message else []  # 去掉命令名称，只保留参数
+        args = message.split()[1:] if message else []
         
-        # 获取说话人列表
         try:
-            response = requests.get(f"{self.converter.msst_url}/speakers", timeout=self.converter.base_setting.get('timeout', 300))
+            response = requests.get(
+                f"{self.converter.api_url}/speakers",
+                timeout=self.converter.timeout
+            )
             if response.status_code != 200:
                 yield event.plain_result("获取说话人列表失败！")
                 return
@@ -532,7 +553,6 @@ class SoVitsSvcPlugin(Star):
                 yield event.plain_result("当前没有可用的说话人")
                 return
                 
-            # 如果有参数，设置默认说话人
             if len(args) > 0:
                 speaker_id = args[0]
                 if speaker_id not in speakers:
@@ -545,7 +565,6 @@ class SoVitsSvcPlugin(Star):
                 yield event.plain_result(f"已将默认说话人设置为: {speaker_id}")
                 return
                 
-            # 显示说话人列表
             speaker_info = "下面列出了可用的说话人列表:\n"
             for i, speaker in enumerate(speakers, 1):
                 speaker_info += f"{i}. {speaker}\n"
@@ -560,10 +579,7 @@ class SoVitsSvcPlugin(Star):
 
     @command("svc_presets", alias=["预设列表"])
     async def show_presets(self, event: AstrMessageEvent):
-        """展示当前可用的预设列表
-        
-        用法：/svc_presets
-        """
+        """展示当前可用的预设列表"""
         try:
             presets = self.converter.msst_processor.get_presets()
             if not presets:
