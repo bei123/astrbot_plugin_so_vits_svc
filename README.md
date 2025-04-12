@@ -122,6 +122,15 @@
 4. 上传的音频文件格式是否支持
 5. 网易云音乐 cookie 是否有效
 
+## 致谢
+
+本项目使用了以下开源项目：
+
+- [MSST-WebUI](https://github.com/SUC-DriverOld/MSST-WebUI) - 用于音频预处理和分离
+- [So-Vits-SVC](https://github.com/svc-develop-team/so-vits-svc) - 用于语音转换
+
+感谢这些优秀的开源项目为语音转换领域做出的贡献。
+
 ## 开源协议
 
 MIT License
