@@ -26,7 +26,6 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from astrbot.api.event import filter
 
-
 class MSSTProcessor:
     """MSST 音频处理器"""
 
@@ -438,7 +437,7 @@ class SoVitsSvcPlugin(Star):
 
         yield event.plain_result(status)
 
-    @filter.command("唱", alias={'牢剑唱', '转换'})
+    @filter.command("唱", alias={"牢剑唱", "转换"})
     async def convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
