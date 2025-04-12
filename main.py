@@ -11,6 +11,7 @@ import requests
 import uuid
 import json
 from .netease_api import NeteaseMusicAPI
+from astrbot.core.platform.comp_record import Comp
 
 class MSSTProcessor:
     def __init__(self, api_url: str = "http://192.168.0.55:9000"):
@@ -491,7 +492,7 @@ class SoVitsSvcPlugin(Star):
             if success:
                 # 发送转换后的文件
                 yield event.plain_result("转换成功！正在发送文件...")
-                yield event.reply_file(output_file)
+                yield Comp.Record(file=output_file, url=output_file)
             else:
                 yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
 
