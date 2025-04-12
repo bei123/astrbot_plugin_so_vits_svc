@@ -202,10 +202,7 @@ class SoVitsSvcPlugin(Star):
     @command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
         """测试插件是否正常工作"""
-        await event.platform.send_message(
-            event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-            "So-Vits-SVC 插件已加载！"
-        )
+        yield event.plain_result("So-Vits-SVC 插件已加载！")
 
     @command("svc_status")
     async def check_status(self, event: AstrMessageEvent):
@@ -249,23 +246,34 @@ class SoVitsSvcPlugin(Star):
                 return
 
         # 检查是否有音频文件
-        if not event.message.attachments:
+        if not hasattr(event.message_obj, 'files') or not event.message_obj.files:
             yield event.plain_result("请上传要转换的音频文件！")
             return
 
-        attachment = event.message.attachments[0]
-        if not attachment.filename.lower().endswith(('.wav', '.mp3')):
+        file = event.message_obj.files[0]
+        filename = file.name if hasattr(file, 'name') else str(file)
+        if not filename.lower().endswith(('.wav', '.mp3')):
             yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
             return
 
         # 下载音频文件
-        input_file = os.path.join(self.temp_dir, f"input_{event.message.id}.wav")
-        output_file = os.path.join(self.temp_dir, f"output_{event.message.id}.wav")
+        input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
+        output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
 
         try:
             # 下载文件
             yield event.plain_result("正在下载音频文件...")
-            await attachment.download(input_file)
+            # 这里需要根据平台适配器的不同来处理文件下载
+            if hasattr(file, 'url'):
+                response = requests.get(file.url, timeout=self.converter.timeout)
+                with open(input_file, 'wb') as f:
+                    f.write(response.content)
+            elif hasattr(file, 'path'):
+                with open(file.path, 'rb') as src, open(input_file, 'wb') as dst:
+                    dst.write(src.read())
+            else:
+                yield event.plain_result("无法处理此类型的文件！")
+                return
             
             # 转换音频
             yield event.plain_result("正在转换音频，请稍候...")
@@ -296,7 +304,7 @@ class SoVitsSvcPlugin(Star):
             except:
                 pass
 
-    @command("svc_speakers", alias={"说话人列表"})
+    @command("svc_speakers", alias=["说话人列表"])
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
         
