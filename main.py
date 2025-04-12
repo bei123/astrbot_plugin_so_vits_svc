@@ -209,7 +209,10 @@ class SoVitsSvcPlugin(Star):
         """检查服务状态"""
         health = self.converter.check_health()
         if not health:
-            await event.reply("服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。")
+            await event.platform.send_message(
+                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                "服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。"
+            )
             return
             
         status = "✅ 服务正常运行\n"
@@ -220,7 +223,10 @@ class SoVitsSvcPlugin(Star):
         status += f"默认说话人ID: {self.converter.default_speaker}\n"
         status += f"默认音调调整: {self.converter.default_pitch}"
         
-        await event.reply(status)
+        await event.platform.send_message(
+            event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+            status
+        )
 
     @command("convert_voice")
     async def convert_voice(self, event: AstrMessageEvent):
@@ -241,17 +247,26 @@ class SoVitsSvcPlugin(Star):
                 if not -12 <= pitch_adjust <= 12:
                     raise ValueError("音调调整必须在-12到12之间")
             except ValueError as e:
-                await event.reply(f"参数错误：{str(e)}")
+                await event.platform.send_message(
+                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                    f"参数错误：{str(e)}"
+                )
                 return
 
         # 检查是否有音频文件
         if not event.message.attachments:
-            await event.reply("请上传要转换的音频文件！")
+            await event.platform.send_message(
+                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                "请上传要转换的音频文件！"
+            )
             return
 
         attachment = event.message.attachments[0]
         if not attachment.filename.lower().endswith(('.wav', '.mp3')):
-            await event.reply("只支持 WAV 或 MP3 格式的音频文件！")
+            await event.platform.send_message(
+                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                "只支持 WAV 或 MP3 格式的音频文件！"
+            )
             return
 
         # 下载音频文件
@@ -260,11 +275,17 @@ class SoVitsSvcPlugin(Star):
 
         try:
             # 下载文件
-            await event.reply("正在下载音频文件...")
+            await event.platform.send_message(
+                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                "正在下载音频文件..."
+            )
             await attachment.download(input_file)
             
             # 转换音频
-            await event.reply("正在转换音频，请稍候...")
+            await event.platform.send_message(
+                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                "正在转换音频，请稍候..."
+            )
             success = self.converter.convert_voice(
                 input_wav=input_file,
                 output_wav=output_file,
@@ -274,13 +295,25 @@ class SoVitsSvcPlugin(Star):
 
             if success:
                 # 发送转换后的文件
-                await event.reply("转换成功！正在发送文件...")
-                await event.reply(file=output_file)
+                await event.platform.send_message(
+                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                    "转换成功！正在发送文件..."
+                )
+                await event.platform.send_file(
+                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                    output_file
+                )
             else:
-                await event.reply("转换失败！请检查服务状态或参数是否正确。")
+                await event.platform.send_message(
+                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                    "转换失败！请检查服务状态或参数是否正确。"
+                )
 
         except Exception as e:
-            await event.reply(f"转换过程中发生错误：{str(e)}")
+            await event.platform.send_message(
+                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+                f"转换过程中发生错误：{str(e)}"
+            )
 
         finally:
             # 清理临时文件
