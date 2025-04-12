@@ -21,6 +21,8 @@ from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
 from astrbot.core.message.components import Record
 from .netease_api import NeteaseMusicAPI
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 
 class MSSTProcessor:
@@ -142,6 +144,7 @@ class VoiceConverter:
         self.config = config or {}
         self.base_setting = self.config.get("base_setting", {})
         self.voice_config = self.config.get("voice_config", {})
+        self.executor = ThreadPoolExecutor(max_workers=1)  # 限制同时只能处理一个转换任务
 
         # API 设置
         self.api_url = self.base_setting.get("base_url", "http://localhost:1145")
@@ -171,6 +174,24 @@ class VoiceConverter:
         except Exception as e:
             logger.error(f"健康检查失败: {str(e)}")
             return None
+
+    async def convert_voice_async(
+        self,
+        input_wav: str,
+        output_wav: str,
+        speaker_id: Optional[str] = None,
+        pitch_adjust: Optional[int] = None,
+    ) -> bool:
+        """异步转换语音"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self.executor,
+            self.convert_voice,
+            input_wav,
+            output_wav,
+            speaker_id,
+            pitch_adjust,
+        )
 
     def convert_voice(
         self,
@@ -288,6 +309,7 @@ class SoVitsSvcPlugin(Star):
         super().__init__(context)
         self.config = config
         self._init_config()
+        self.conversion_tasks = {}  # 存储正在进行的转换任务
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -435,6 +457,9 @@ class SoVitsSvcPlugin(Star):
         input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
         output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
 
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+
         try:
             # 如果指定了歌曲名，从网易云下载
             if song_name:
@@ -516,12 +541,27 @@ class SoVitsSvcPlugin(Star):
 
             # 转换音频
             yield event.plain_result("正在转换音频，请稍候...")
-            success = self.converter.convert_voice(
-                input_wav=input_file,
-                output_wav=output_file,
-                speaker_id=speaker_id,
-                pitch_adjust=pitch_adjust,
+
+            # 创建异步任务
+            task = asyncio.create_task(
+                self.converter.convert_voice_async(
+                    input_wav=input_file,
+                    output_wav=output_file,
+                    speaker_id=speaker_id,
+                    pitch_adjust=pitch_adjust,
+                )
             )
+
+            # 存储任务
+            self.conversion_tasks[task_id] = {
+                "task": task,
+                "input_file": input_file,
+                "output_file": output_file,
+                "event": event
+            }
+
+            # 等待任务完成
+            success = await task
 
             if success:
                 yield event.plain_result("转换成功！正在发送文件...")
@@ -532,8 +572,10 @@ class SoVitsSvcPlugin(Star):
 
         except Exception as e:
             yield event.plain_result(f"转换过程中发生错误：{str(e)}")
-
         finally:
+            # 清理任务
+            if task_id in self.conversion_tasks:
+                del self.conversion_tasks[task_id]
             # 清理临时文件
             try:
                 if os.path.exists(input_file):
@@ -542,6 +584,35 @@ class SoVitsSvcPlugin(Star):
                     os.remove(output_file)
             except (OSError, IOError) as e:
                 logger.error(f"清理临时文件失败: {str(e)}")
+
+    @command("cancel_convert")
+    async def cancel_convert(self, event: AstrMessageEvent):
+        """取消正在进行的转换任务"""
+        if not self.conversion_tasks:
+            yield event.plain_result("当前没有正在进行的转换任务")
+            return
+
+        for task_id, task_info in list(self.conversion_tasks.items()):
+            task = task_info["task"]
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                # 清理临时文件
+                try:
+                    if os.path.exists(task_info["input_file"]):
+                        os.remove(task_info["input_file"])
+                    if os.path.exists(task_info["output_file"]):
+                        os.remove(task_info["output_file"])
+                except (OSError, IOError) as e:
+                    logger.error(f"清理临时文件失败: {str(e)}")
+                del self.conversion_tasks[task_id]
+                yield event.plain_result("已取消转换任务")
+                return
+
+        yield event.plain_result("没有找到可取消的转换任务")
 
     @command("svc_speakers", alias=["说话人列表"])
     async def show_speakers(self, event: AstrMessageEvent):
