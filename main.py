@@ -204,7 +204,8 @@ class SoVitsSvcPlugin(Star):
         """测试插件是否正常工作"""
         await event.reply("So-Vits-SVC 插件已加载！")
 
-    @command("svc_status")
+
+    @filter.command("svc_status", alias={"状态"})
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
         health = self.converter.check_health()
