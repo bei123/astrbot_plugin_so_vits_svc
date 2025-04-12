@@ -20,7 +20,7 @@ from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
 from astrbot.core.message.components import Record
-from astrbot.core.platform.permission import PermissionType
+from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
