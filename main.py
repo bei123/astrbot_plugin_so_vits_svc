@@ -21,6 +21,7 @@ class MSSTProcessor:
         """
         self.api_url = api_url
         self.session = requests.Session()
+        self.available_presets = self.get_presets()
         
     def get_presets(self) -> list:
         """获取可用的预设列表
@@ -39,6 +40,27 @@ class MSSTProcessor:
         except Exception as e:
             logger.error(f"获取预设列表出错: {str(e)}")
             return []
+            
+    def find_available_preset(self, preferred_preset: str = "wav.json") -> str:
+        """查找可用的预设文件
+        
+        Args:
+            preferred_preset: 首选的预设文件名
+            
+        Returns:
+            可用的预设文件名
+        """
+        # 如果首选预设可用，直接返回
+        if preferred_preset in self.available_presets:
+            return preferred_preset
+            
+        # 否则尝试查找其他可用的预设
+        for preset in self.available_presets:
+            if preset.endswith('.json'):
+                return preset
+                
+        # 如果没有可用的预设，返回首选预设（让 API 报错）
+        return preferred_preset
         
     def process_audio(self, input_file: str, preset_name: str = "wav.json") -> Optional[str]:
         """处理音频文件
@@ -51,6 +73,10 @@ class MSSTProcessor:
             处理后的音频文件路径，如果失败则返回 None
         """
         try:
+            # 查找可用的预设
+            available_preset = self.find_available_preset(preset_name)
+            logger.info(f"使用预设文件: {available_preset}")
+            
             # 读取音频文件
             with open(input_file, 'rb') as f:
                 audio_data = f.read()
@@ -60,7 +86,7 @@ class MSSTProcessor:
                 'input_file': ('input.wav', audio_data, 'audio/wav')
             }
             data = {
-                'preset_path': preset_name,
+                'preset_path': available_preset,
                 'output_format': 'wav',
                 'extra_output_dir': 'false'
             }
