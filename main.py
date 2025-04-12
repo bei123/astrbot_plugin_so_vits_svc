@@ -6,12 +6,13 @@ So-Vits-SVC API 插件
 提供语音转换、MSST音频处理和网易云音乐下载功能
 """
 
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 import os
 import time
 import uuid
-import json
 import requests
+import json
+import aiohttp
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
 from astrbot.api.event.filter import command
@@ -250,7 +251,7 @@ class VoiceConverter:
             else:
                 try:
                     error_msg = response.json().get("error", "未知错误")
-                except:
+                except (json.JSONDecodeError, AttributeError):
                     error_msg = f"HTTP {response.status_code}: {response.text}"
                 logger.error(f"转换失败！状态码: {response.status_code}")
                 logger.error(f"错误信息: {error_msg}")
@@ -502,9 +503,10 @@ class SoVitsSvcPlugin(Star):
 
                 yield event.plain_result("正在处理上传的音频文件...")
                 if hasattr(file, "url"):
-                    response = requests.get(file.url, timeout=self.converter.timeout)
-                    with open(input_file, "wb") as f:
-                        f.write(response.content)
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(file.url, timeout=self.converter.timeout) as response:
+                            with open(input_file, "wb") as f:
+                                f.write(await response.read())
                 elif hasattr(file, "path"):
                     with open(file.path, "rb") as src, open(input_file, "wb") as dst:
                         dst.write(src.read())
@@ -538,8 +540,8 @@ class SoVitsSvcPlugin(Star):
                     os.remove(input_file)
                 if os.path.exists(output_file):
                     os.remove(output_file)
-            except:
-                pass
+            except (OSError, IOError) as e:
+                logger.error(f"清理临时文件失败: {str(e)}")
 
     @command("svc_speakers", alias=["说话人列表"])
     async def show_speakers(self, event: AstrMessageEvent):
@@ -553,38 +555,40 @@ class SoVitsSvcPlugin(Star):
         args = message.split()[1:] if message else []
 
         try:
-            response = requests.get(
-                f"{self.converter.api_url}/speakers", timeout=self.converter.timeout
-            )
-            if response.status_code != 200:
-                yield event.plain_result("获取说话人列表失败！")
-                return
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.converter.api_url}/speakers",
+                    timeout=self.converter.timeout
+                ) as response:
+                    if response.status != 200:
+                        yield event.plain_result("获取说话人列表失败！")
+                        return
 
-            speakers = response.json()
-            if not speakers:
-                yield event.plain_result("当前没有可用的说话人")
-                return
+                    speakers = await response.json()
+                    if not speakers:
+                        yield event.plain_result("当前没有可用的说话人")
+                        return
 
-            if len(args) > 0:
-                speaker_id = args[0]
-                if speaker_id not in speakers:
-                    yield event.plain_result(f"说话人 {speaker_id} 不存在！")
-                    return
+                    if len(args) > 0:
+                        speaker_id = args[0]
+                        if speaker_id not in speakers:
+                            yield event.plain_result(f"说话人 {speaker_id} 不存在！")
+                            return
 
-                self.converter.default_speaker = speaker_id
-                self.config["voice_config"]["default_speaker"] = speaker_id
-                self.config.save_config()
-                yield event.plain_result(f"已将默认说话人设置为: {speaker_id}")
-                return
+                        self.converter.default_speaker = speaker_id
+                        self.config["voice_config"]["default_speaker"] = speaker_id
+                        self.config.save_config()
+                        yield event.plain_result(f"已将默认说话人设置为: {speaker_id}")
+                        return
 
-            speaker_info = "下面列出了可用的说话人列表:\n"
-            for i, speaker in enumerate(speakers, 1):
-                speaker_info += f"{i}. {speaker}\n"
+                    speaker_info = "下面列出了可用的说话人列表:\n"
+                    for i, speaker in enumerate(speakers, 1):
+                        speaker_info += f"{i}. {speaker}\n"
 
-            speaker_info += f"\n当前默认说话人: [{self.converter.default_speaker}]\n"
-            speaker_info += "Tips: 使用 /svc_speakers <说话人ID>，即可设置默认说话人"
+                    speaker_info += f"\n当前默认说话人: [{self.converter.default_speaker}]\n"
+                    speaker_info += "Tips: 使用 /svc_speakers <说话人ID>，即可设置默认说话人"
 
-            yield event.plain_result(speaker_info)
+                    yield event.plain_result(speaker_info)
 
         except Exception as e:
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
