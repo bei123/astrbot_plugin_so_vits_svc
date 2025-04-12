@@ -135,6 +135,7 @@ class VoiceConverter:
         """
         self.config = config or {}
         self.msst_url = self.config.get('base_setting', {}).get('msst_url', 'http://localhost:9000')
+        self.api_url = self.config.get('base_setting', {}).get('base_url', 'http://localhost:1145')
         self.msst_preset = self.config.get('base_setting', {}).get('msst_preset', 'wav.json')
         self.msst_processor = MSSTProcessor(self.msst_url)
         self.netease_api = NeteaseMusicAPI(self.config)
@@ -153,7 +154,7 @@ class VoiceConverter:
     def check_health(self):
         """检查服务健康状态"""
         try:
-            response = self.session.get(f"{self.msst_url}/health")
+            response = self.session.get(f"{self.api_url}/health")
             return response.json()
         except Exception as e:
             logger.error(f"健康检查失败: {str(e)}")
