@@ -73,9 +73,15 @@ class VoiceConverter:
         if not os.path.exists(input_wav):
             raise FileNotFoundError(f"输入文件不存在: {input_wav}")
             
+        # 读取音频文件内容
+        with open(input_wav, 'rb') as f:
+            audio_data = f.read()
+            
         # 准备请求数据
+        files = {
+            'audio': ('input.wav', audio_data, 'audio/wav')
+        }
         data = {
-            "audio_path": os.path.abspath(input_wav),
             "tran": str(pitch_adjust),
             "spk": str(speaker_id),
             "wav_format": "wav"
@@ -88,7 +94,12 @@ class VoiceConverter:
             logger.info(f"音调调整: {pitch_adjust}")
             
             start_time = time.time()
-            response = self.session.post(f"{self.api_url}/wav2wav", data=data, timeout=self.timeout)
+            response = self.session.post(
+                f"{self.api_url}/wav2wav",
+                data=data,
+                files=files,
+                timeout=self.timeout
+            )
             
             # 检查响应
             if response.status_code == 200:
@@ -101,7 +112,10 @@ class VoiceConverter:
                 logger.info(f"处理耗时: {process_time:.2f}秒")
                 return True
             else:
-                error_msg = response.json().get("error", "未知错误")
+                try:
+                    error_msg = response.json().get("error", "未知错误")
+                except:
+                    error_msg = f"HTTP {response.status_code}: {response.text}"
                 logger.error(f"转换失败！状态码: {response.status_code}")
                 logger.error(f"错误信息: {error_msg}")
                 return False
