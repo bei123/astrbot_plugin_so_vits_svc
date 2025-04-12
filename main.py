@@ -202,18 +202,17 @@ class SoVitsSvcPlugin(Star):
     @command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
         """测试插件是否正常工作"""
-        await event.reply("So-Vits-SVC 插件已加载！")
+        await event.platform.send_message(
+            event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
+            "So-Vits-SVC 插件已加载！"
+        )
 
-
-    @filter.command("svc_status", alias={"svc_status"})
+    @command("svc_status")
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
         health = self.converter.check_health()
         if not health:
-            await event.platform.send_message(
-                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                "服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。"
-            )
+            yield event.plain_result("服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。")
             return
             
         status = "✅ 服务正常运行\n"
@@ -224,10 +223,7 @@ class SoVitsSvcPlugin(Star):
         status += f"默认说话人ID: {self.converter.default_speaker}\n"
         status += f"默认音调调整: {self.converter.default_pitch}"
         
-        await event.platform.send_message(
-            event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-            status
-        )
+        yield event.plain_result(status)
 
     @command("convert_voice")
     async def convert_voice(self, event: AstrMessageEvent):
@@ -248,26 +244,17 @@ class SoVitsSvcPlugin(Star):
                 if not -12 <= pitch_adjust <= 12:
                     raise ValueError("音调调整必须在-12到12之间")
             except ValueError as e:
-                await event.platform.send_message(
-                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                    f"参数错误：{str(e)}"
-                )
+                yield event.plain_result(f"参数错误：{str(e)}")
                 return
 
         # 检查是否有音频文件
         if not event.message.attachments:
-            await event.platform.send_message(
-                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                "请上传要转换的音频文件！"
-            )
+            yield event.plain_result("请上传要转换的音频文件！")
             return
 
         attachment = event.message.attachments[0]
         if not attachment.filename.lower().endswith(('.wav', '.mp3')):
-            await event.platform.send_message(
-                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                "只支持 WAV 或 MP3 格式的音频文件！"
-            )
+            yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
             return
 
         # 下载音频文件
@@ -276,17 +263,11 @@ class SoVitsSvcPlugin(Star):
 
         try:
             # 下载文件
-            await event.platform.send_message(
-                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                "正在下载音频文件..."
-            )
+            yield event.plain_result("正在下载音频文件...")
             await attachment.download(input_file)
             
             # 转换音频
-            await event.platform.send_message(
-                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                "正在转换音频，请稍候..."
-            )
+            yield event.plain_result("正在转换音频，请稍候...")
             success = self.converter.convert_voice(
                 input_wav=input_file,
                 output_wav=output_file,
@@ -296,25 +277,13 @@ class SoVitsSvcPlugin(Star):
 
             if success:
                 # 发送转换后的文件
-                await event.platform.send_message(
-                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                    "转换成功！正在发送文件..."
-                )
-                await event.platform.send_file(
-                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                    output_file
-                )
+                yield event.plain_result("转换成功！正在发送文件...")
+                yield event.file_result(output_file)
             else:
-                await event.platform.send_message(
-                    event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                    "转换失败！请检查服务状态或参数是否正确。"
-                )
+                yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
 
         except Exception as e:
-            await event.platform.send_message(
-                event.message_obj.group_id if event.message_obj.group_id else event.message_obj.sender.id,
-                f"转换过程中发生错误：{str(e)}"
-            )
+            yield event.plain_result(f"转换过程中发生错误：{str(e)}")
 
         finally:
             # 清理临时文件
@@ -325,3 +294,51 @@ class SoVitsSvcPlugin(Star):
                     os.remove(output_file)
             except:
                 pass
+
+    @command("svc_speakers", alias={"说话人列表"})
+    async def show_speakers(self, event: AstrMessageEvent):
+        """展示当前可用的说话人列表，支持切换默认说话人
+        
+        用法：/svc_speakers [说话人ID]
+        示例：/svc_speakers - 显示说话人列表
+              /svc_speakers 1 - 设置默认说话人为1
+        """
+        args = event.get_args()
+        
+        # 获取说话人列表
+        try:
+            response = requests.get(f"{self.converter.api_url}/speakers", timeout=self.converter.timeout)
+            if response.status_code != 200:
+                yield event.plain_result("获取说话人列表失败！")
+                return
+                
+            speakers = response.json()
+            if not speakers:
+                yield event.plain_result("当前没有可用的说话人")
+                return
+                
+            # 如果有参数，设置默认说话人
+            if len(args) > 0:
+                speaker_id = args[0]
+                if speaker_id not in speakers:
+                    yield event.plain_result(f"说话人 {speaker_id} 不存在！")
+                    return
+                    
+                self.converter.default_speaker = speaker_id
+                self.config["voice_config"]["default_speaker"] = speaker_id
+                self.config.save_config()
+                yield event.plain_result(f"已将默认说话人设置为: {speaker_id}")
+                return
+                
+            # 显示说话人列表
+            speaker_info = "下面列出了可用的说话人列表:\n"
+            for i, speaker in enumerate(speakers, 1):
+                speaker_info += f"{i}. {speaker}\n"
+                
+            speaker_info += f"\n当前默认说话人: [{self.converter.default_speaker}]\n"
+            speaker_info += "Tips: 使用 /svc_speakers <说话人ID>，即可设置默认说话人"
+            
+            yield event.plain_result(speaker_info)
+            
+        except Exception as e:
+            yield event.plain_result(f"获取说话人列表失败：{str(e)}")
