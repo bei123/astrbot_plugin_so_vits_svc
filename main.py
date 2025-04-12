@@ -12,6 +12,7 @@ import uuid
 import json
 from .netease_api import NeteaseMusicAPI
 from astrbot.core.platform.comp_record import Comp
+from astrbot.core.message.components import Record
 
 class MSSTProcessor:
     def __init__(self, api_url: str = "http://192.168.0.55:9000"):
@@ -295,7 +296,7 @@ class SoVitsSvcPlugin(Star):
                                 "description": "API服务器地址",
                                 "type": "string",
                                 "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
-                                "default": "http://localhost:1145"
+                                "default": "http://192.168.0.55:1145"
                             },
                             "timeout": {
                                 "description": "请求超时时间(秒)",
@@ -307,7 +308,7 @@ class SoVitsSvcPlugin(Star):
                                 "description": "MSST-WebUI API地址",
                                 "type": "string",
                                 "hint": "MSST-WebUI 的 API 地址",
-                                "default": "http://localhost:9000"
+                                "default": "http://192.168.0.55:9000"
                             },
                             "msst_preset": {
                                 "description": "MSST预设文件路径",
@@ -492,7 +493,8 @@ class SoVitsSvcPlugin(Star):
             if success:
                 # 发送转换后的文件
                 yield event.plain_result("转换成功！正在发送文件...")
-                yield Comp.Record(file=output_file, url=output_file)
+                chain = [Record.fromFileSystem(output_file)]
+                yield event.chain_result(chain)
             else:
                 yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
 
