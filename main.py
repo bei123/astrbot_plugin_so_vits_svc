@@ -11,7 +11,6 @@ import requests
 import uuid
 import json
 from .netease_api import NeteaseMusicAPI
-from astrbot.core.platform.comp_record import Comp
 from astrbot.core.message.components import Record
 
 class MSSTProcessor:
