@@ -125,35 +125,35 @@ class MSSTProcessor:
             return None
 
 class VoiceConverter:
-    def __init__(self, config: Dict):
+    """语音转换器"""
+    
+    def __init__(self, config: Dict = None):
         """初始化语音转换器
         
         Args:
             config: 插件配置字典
         """
-        self.base_setting = config.get('base_setting', {})
-        self.voice_config = config.get('voice_config', {})
+        self.config = config or {}
+        self.msst_url = self.config.get('base_setting', {}).get('msst_url', 'http://localhost:9000')
+        self.msst_preset = self.config.get('base_setting', {}).get('msst_preset', 'wav.json')
+        self.msst_processor = MSSTProcessor(self.msst_url)
+        self.netease_api = NeteaseMusicAPI(self.config)
         
         # 基础设置
-        self.api_url = self.base_setting.get('base_url', 'http://192.168.0.55:1145')
-        self.timeout = self.base_setting.get('timeout', 300)
+        self.base_setting = self.config.get('base_setting', {})
+        self.voice_config = self.config.get('voice_config', {})
         
         # 语音转换设置
         self.max_queue_size = self.voice_config.get('max_queue_size', 100)
         self.default_speaker = self.voice_config.get('default_speaker', '0')
         self.default_pitch = self.voice_config.get('default_pitch', 0)
         
-        # MSST 设置
-        self.msst_url = self.base_setting.get('msst_url', 'http://192.168.0.55:9000')
-        self.msst_preset = self.base_setting.get('msst_preset', 'wav.json')
-        
         self.session = requests.Session()
-        self.msst_processor = MSSTProcessor(self.msst_url)
             
     def check_health(self):
         """检查服务健康状态"""
         try:
-            response = self.session.get(f"{self.api_url}/health")
+            response = self.session.get(f"{self.msst_url}/health")
             return response.json()
         except Exception as e:
             logger.error(f"健康检查失败: {str(e)}")
@@ -217,10 +217,10 @@ class VoiceConverter:
             
             start_time = time.time()
             response = self.session.post(
-                f"{self.api_url}/wav2wav",
+                f"{self.msst_url}/wav2wav",
                 data=data,
                 files=files,
-                timeout=self.timeout
+                timeout=self.base_setting.get('timeout', 300)
             )
             
             # 检查响应
@@ -270,7 +270,6 @@ class SoVitsSvcPlugin(Star):
         super().__init__(context)
         self.config = config
         self._init_config()
-        self.netease_api = NeteaseMusicAPI()
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -370,8 +369,7 @@ class SoVitsSvcPlugin(Star):
         status += f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载'}\n"
         status += f"当前队列大小: {health.get('queue_size', 0)}\n"
         status += f"API 版本: {health.get('version', '未知')}\n"
-        status += f"API 地址: {self.converter.api_url}\n"
-        status += f"MSST API 地址: {self.converter.msst_url}\n"
+        status += f"API 地址: {self.converter.msst_url}\n"
         status += f"MSST 预设: {self.converter.msst_preset}\n"
         status += f"默认说话人ID: {self.converter.default_speaker}\n"
         status += f"默认音调调整: {self.converter.default_pitch}"
@@ -419,7 +417,7 @@ class SoVitsSvcPlugin(Star):
             if song_name:
                 try:
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
-                    song_info = self.netease_api.get_song_with_highest_quality(song_name)
+                    song_info = self.converter.netease_api.get_song_with_highest_quality(song_name)
                     
                     if not song_info:
                         yield event.plain_result(f"未找到歌曲：{song_name}")
@@ -435,7 +433,7 @@ class SoVitsSvcPlugin(Star):
                                            f"正在下载...")
                     
                     # 下载歌曲
-                    downloaded_file = self.netease_api.download_song(song_info, self.temp_dir)
+                    downloaded_file = self.converter.netease_api.download_song(song_info, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载歌曲失败！")
                         return
@@ -470,7 +468,7 @@ class SoVitsSvcPlugin(Star):
                 # 下载上传的文件
                 yield event.plain_result("正在处理上传的音频文件...")
                 if hasattr(file, 'url'):
-                    response = requests.get(file.url, timeout=self.converter.timeout)
+                    response = requests.get(file.url, timeout=self.converter.base_setting.get('timeout', 300))
                     with open(input_file, 'wb') as f:
                         f.write(response.content)
                 elif hasattr(file, 'path'):
@@ -523,7 +521,7 @@ class SoVitsSvcPlugin(Star):
         
         # 获取说话人列表
         try:
-            response = requests.get(f"{self.converter.api_url}/speakers", timeout=self.converter.timeout)
+            response = requests.get(f"{self.converter.msst_url}/speakers", timeout=self.converter.base_setting.get('timeout', 300))
             if response.status_code != 200:
                 yield event.plain_result("获取说话人列表失败！")
                 return

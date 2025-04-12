@@ -14,25 +14,19 @@ from hashlib import md5
 from random import randrange
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from typing import Dict
 
 class NeteaseMusicAPI:
     """网易云音乐API类"""
     
-    def __init__(self, cookie_file='cookie.txt'):
+    def __init__(self, config: Dict = None):
         """初始化API
         
         Args:
-            cookie_file: cookie文件路径，默认为'cookie.txt'
+            config: 插件配置字典
         """
-        self.cookie_file = cookie_file
-        self.cookies = self._parse_cookie(self._read_cookie())
-    
-    def _read_cookie(self):
-        """读取cookie文件"""
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        cookie_file = os.path.join(script_dir, self.cookie_file)
-        with open(cookie_file, 'r') as f:
-            return f.read()
+        self.config = config or {}
+        self.cookies = self._parse_cookie(self.config.get('base_setting', {}).get('netease_cookie', ''))
     
     def _parse_cookie(self, text):
         """解析cookie字符串为字典"""
