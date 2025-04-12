@@ -52,15 +52,15 @@ class MSSTProcessor:
         """
         # 如果首选预设可用，直接返回
         if preferred_preset in self.available_presets:
-            return preferred_preset
+            return os.path.join("presets", preferred_preset)
             
         # 否则尝试查找其他可用的预设
         for preset in self.available_presets:
             if preset.endswith('.json'):
-                return preset
+                return os.path.join("presets", preset)
                 
         # 如果没有可用的预设，返回首选预设（让 API 报错）
-        return preferred_preset
+        return os.path.join("presets", preferred_preset)
         
     def process_audio(self, input_file: str, preset_name: str = "wav.json") -> Optional[str]:
         """处理音频文件
