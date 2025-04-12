@@ -349,12 +349,7 @@ class SoVitsSvcPlugin(Star):
         cmd = getattr(self, f"{cmd_name}_cmd")
         return filter.command(cmd, alias=alias)
 
-    @property
-    def convert_voice(self):
-        """转换语音命令装饰器"""
-        return self.get_command_filter("convert_voice", alias={"转换", "convert"})
-
-    @convert_voice
+    @filter.command(convert_voice_cmd, alias={"转换", "convert"})
     async def handle_convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
