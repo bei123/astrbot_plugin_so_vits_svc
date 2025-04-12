@@ -218,7 +218,7 @@ class VoiceConverter:
             
             start_time = time.time()
             response = self.session.post(
-                f"{self.msst_url}/wav2wav",
+                f"{self.api_url}/wav2wav",
                 data=data,
                 files=files,
                 timeout=self.base_setting.get('timeout', 300)
