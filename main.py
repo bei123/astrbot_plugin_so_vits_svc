@@ -11,6 +11,15 @@ import requests
 import uuid
 import json
 from .netease_api import NeteaseMusicAPI
+import asyncio
+import sys
+import mimetypes
+import aiohttp
+from astrbot.core.initial_loader import InitialLoader
+from astrbot.core import db_helper
+from astrbot.core import logger, LogManager, LogBroker
+from astrbot.core.config.default import VERSION
+from astrbot.core.utils.io import download_dashboard, get_dashboard_version
 
 class VoiceConverter:
     def __init__(self, config: Dict):
@@ -31,6 +40,9 @@ class VoiceConverter:
         self.default_speaker = self.voice_config.get('default_speaker', '0')
         self.default_pitch = self.voice_config.get('default_pitch', 0)
         
+        # infer接口设置
+        self.infer_url = self.base_setting.get('infer_url', 'http://localhost:9000/infer')
+        
         self.session = requests.Session()
             
     def check_health(self):
@@ -42,7 +54,7 @@ class VoiceConverter:
             logger.error(f"健康检查失败: {str(e)}")
             return None
             
-    def convert_voice(self, input_wav, output_wav, speaker_id=None, pitch_adjust=None):
+    async def convert_voice(self, input_wav, output_wav, speaker_id=None, pitch_adjust=None):
         """
         转换语音
         
@@ -106,6 +118,12 @@ class VoiceConverter:
                 # 保存输出文件
                 with open(output_wav, "wb") as f:
                     f.write(response.content)
+                    
+                # 使用infer接口进一步处理
+                logger.info("开始使用infer接口处理音频...")
+                success = await process_audio_with_infer(output_wav, output_wav, self.infer_url)
+                if not success:
+                    raise RuntimeError("infer接口处理失败")
                     
                 process_time = time.time() - start_time
                 logger.info(f"转换成功！输出文件已保存为: {output_wav}")
@@ -176,6 +194,12 @@ class SoVitsSvcPlugin(Star):
                                 "type": "integer",
                                 "hint": "转换请求的超时时间",
                                 "default": 300
+                            },
+                            "infer_url": {
+                                "description": "infer接口地址",
+                                "type": "string",
+                                "hint": "infer接口地址",
+                                "default": "http://localhost:9000/infer"
                             }
                         }
                     },
@@ -342,7 +366,7 @@ class SoVitsSvcPlugin(Star):
             
             # 转换音频
             yield event.plain_result("正在转换音频，请稍候...")
-            success = self.converter.convert_voice(
+            success = await self.converter.convert_voice(
                 input_wav=input_file,
                 output_wav=output_file,
                 speaker_id=speaker_id,
@@ -417,3 +441,60 @@ class SoVitsSvcPlugin(Star):
             
         except Exception as e:
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
+
+
+
+async def process_audio_with_infer(input_file: str, output_file: str, infer_url: str = "http://localhost:9000/infer"):
+    """使用infer接口处理音频文件
+    
+    Args:
+        input_file: 输入音频文件路径
+        output_file: 输出音频文件路径
+        infer_url: infer接口地址
+    """
+    try:
+        # 读取音频文件
+        with open(input_file, 'rb') as f:
+            audio_data = f.read()
+            
+        # 准备请求数据
+        data = aiohttp.FormData()
+        data.add_field('input_file',
+                      audio_data,
+                      filename='input.wav',
+                      content_type='audio/wav')
+        data.add_field('output_format', 'wav')
+        data.add_field('extra_output_dir', 'false')
+        
+        # 发送请求
+        async with aiohttp.ClientSession() as session:
+            async with session.post(infer_url, data=data) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"处理失败: {error_text}")
+                    
+                # 获取处理后的文件
+                result = await response.json()
+                if result['status'] != 'success':
+                    raise Exception(f"处理失败: {result['message']}")
+                    
+                # 下载处理后的文件
+                output_dir = result['output_path']
+                output_files = os.listdir(output_dir)
+                if not output_files:
+                    raise Exception("未找到处理后的文件")
+                    
+                # 获取第一个输出文件
+                processed_file = os.path.join(output_dir, output_files[0])
+                with open(processed_file, 'rb') as f:
+                    processed_data = f.read()
+                    
+                # 保存到输出文件
+                with open(output_file, 'wb') as f:
+                    f.write(processed_data)
+                    
+                return True
+                
+    except Exception as e:
+        logger.error(f"处理音频失败: {str(e)}")
+        return False
