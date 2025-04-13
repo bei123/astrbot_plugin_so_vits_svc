@@ -67,13 +67,13 @@
             },
             "default_shallow_diffusion": {
                 "description": "默认使用浅扩散",
-                "type": "boolean",
+                "type": "bool",
                 "hint": "是否默认使用浅扩散",
                 "default": true
             },
             "default_only_diffusion": {
                 "description": "默认使用纯扩散",
-                "type": "boolean",
+                "type": "bool",
                 "hint": "是否默认使用纯扩散",
                 "default": false
             },
@@ -85,7 +85,7 @@
             },
             "default_auto_predict_f0": {
                 "description": "默认自动预测音高",
-                "type": "boolean",
+                "type": "bool",
                 "hint": "是否默认自动预测音高",
                 "default": false
             },
@@ -97,7 +97,7 @@
             },
             "default_f0_filter": {
                 "description": "默认过滤F0",
-                "type": "boolean",
+                "type": "bool",
                 "hint": "是否默认过滤F0",
                 "default": false
             },
