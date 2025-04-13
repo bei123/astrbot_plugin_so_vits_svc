@@ -139,7 +139,7 @@
 - [So-Vits-SVC](https://github.com/svc-develop-team/so-vits-svc) - 用于语音转换
 - [Netease_url](https://github.com/Suxiaoqinx/Netease_url) - 用于网易云音乐解析和下载
 
-感谢这些优秀的开源项目为语音转换领域做出的贡献。
+感谢这些优秀的开源项目。
 
 ## 开源协议
 
