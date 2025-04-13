@@ -159,6 +159,16 @@ class VoiceConverter:
         self.max_queue_size = self.voice_config.get("max_queue_size", 100)
         self.default_speaker = self.voice_config.get("default_speaker", "0")
         self.default_pitch = self.voice_config.get("default_pitch", 0)
+        self.default_k_step = self.voice_config.get("default_k_step", 100)
+        self.default_shallow_diffusion = self.voice_config.get("default_shallow_diffusion", True)
+        self.default_only_diffusion = self.voice_config.get("default_only_diffusion", False)
+        self.default_cluster_infer_ratio = self.voice_config.get("default_cluster_infer_ratio", 0)
+        self.default_auto_predict_f0 = self.voice_config.get("default_auto_predict_f0", False)
+        self.default_noice_scale = self.voice_config.get("default_noice_scale", 0.4)
+        self.default_f0_filter = self.voice_config.get("default_f0_filter", False)
+        self.default_f0_predictor = self.voice_config.get("default_f0_predictor", "fcpe")
+        self.default_enhancer_adaptive_key = self.voice_config.get("default_enhancer_adaptive_key", 0)
+        self.default_cr_threshold = self.voice_config.get("default_cr_threshold", 0.05)
 
         # 初始化组件
         self.session = requests.Session()
@@ -184,6 +194,16 @@ class VoiceConverter:
         output_wav: str,
         speaker_id: Optional[str] = None,
         pitch_adjust: Optional[int] = None,
+        k_step: Optional[int] = None,
+        shallow_diffusion: Optional[bool] = None,
+        only_diffusion: Optional[bool] = None,
+        cluster_infer_ratio: Optional[float] = None,
+        auto_predict_f0: Optional[bool] = None,
+        noice_scale: Optional[float] = None,
+        f0_filter: Optional[bool] = None,
+        f0_predictor: Optional[str] = None,
+        enhancer_adaptive_key: Optional[int] = None,
+        cr_threshold: Optional[float] = None,
     ) -> bool:
         """异步转换语音"""
         async with self.task_lock:  # 使用锁确保同一时间只有一个任务在执行
@@ -200,6 +220,16 @@ class VoiceConverter:
                     output_wav,
                     speaker_id,
                     pitch_adjust,
+                    k_step,
+                    shallow_diffusion,
+                    only_diffusion,
+                    cluster_infer_ratio,
+                    auto_predict_f0,
+                    noice_scale,
+                    f0_filter,
+                    f0_predictor,
+                    enhancer_adaptive_key,
+                    cr_threshold,
                 )
             finally:
                 self.current_task = None
@@ -210,6 +240,16 @@ class VoiceConverter:
         output_wav: str,
         speaker_id: Optional[str] = None,
         pitch_adjust: Optional[int] = None,
+        k_step: Optional[int] = None,
+        shallow_diffusion: Optional[bool] = None,
+        only_diffusion: Optional[bool] = None,
+        cluster_infer_ratio: Optional[float] = None,
+        auto_predict_f0: Optional[bool] = None,
+        noice_scale: Optional[float] = None,
+        f0_filter: Optional[bool] = None,
+        f0_predictor: Optional[str] = None,
+        enhancer_adaptive_key: Optional[int] = None,
+        cr_threshold: Optional[float] = None,
     ) -> bool:
         """转换语音
 
@@ -218,6 +258,16 @@ class VoiceConverter:
             output_wav: 输出音频文件路径
             speaker_id: 说话人ID，默认使用配置值
             pitch_adjust: 音调调整，默认使用配置值
+            k_step: 扩散步数，默认使用配置值
+            shallow_diffusion: 使用浅扩散，默认使用配置值
+            only_diffusion: 使用纯扩散，默认使用配置值
+            cluster_infer_ratio: 聚类推理比例，默认使用配置值
+            auto_predict_f0: 自动预测音高，默认使用配置值
+            noice_scale: 噪声比例，默认使用配置值
+            f0_filter: 过滤F0，默认使用配置值
+            f0_predictor: F0预测器，默认使用配置值
+            enhancer_adaptive_key: 增强器自适应键，默认使用配置值
+            cr_threshold: 交叉参考阈值，默认使用配置值
 
         Returns:
             转换是否成功
@@ -227,6 +277,26 @@ class VoiceConverter:
             speaker_id = self.default_speaker
         if pitch_adjust is None:
             pitch_adjust = self.default_pitch
+        if k_step is None:
+            k_step = self.default_k_step
+        if shallow_diffusion is None:
+            shallow_diffusion = self.default_shallow_diffusion
+        if only_diffusion is None:
+            only_diffusion = self.default_only_diffusion
+        if cluster_infer_ratio is None:
+            cluster_infer_ratio = self.default_cluster_infer_ratio
+        if auto_predict_f0 is None:
+            auto_predict_f0 = self.default_auto_predict_f0
+        if noice_scale is None:
+            noice_scale = self.default_noice_scale
+        if f0_filter is None:
+            f0_filter = self.default_f0_filter
+        if f0_predictor is None:
+            f0_predictor = self.default_f0_predictor
+        if enhancer_adaptive_key is None:
+            enhancer_adaptive_key = self.default_enhancer_adaptive_key
+        if cr_threshold is None:
+            cr_threshold = self.default_cr_threshold
 
         # 检查服务健康状态
         health = self.check_health()
@@ -259,12 +329,32 @@ class VoiceConverter:
                 "tran": str(pitch_adjust),
                 "spk": str(speaker_id),
                 "wav_format": "wav",
+                "k_step": str(k_step),
+                "shallow_diffusion": str(shallow_diffusion).lower(),
+                "only_diffusion": str(only_diffusion).lower(),
+                "cluster_infer_ratio": str(cluster_infer_ratio),
+                "auto_predict_f0": str(auto_predict_f0).lower(),
+                "noice_scale": str(noice_scale),
+                "f0_filter": str(f0_filter).lower(),
+                "f0_predictor": f0_predictor,
+                "enhancer_adaptive_key": str(enhancer_adaptive_key),
+                "cr_threshold": str(cr_threshold),
             }
 
             # 发送请求
             logger.info(f"开始转换音频: {processed_file}")
             logger.info(f"使用说话人ID: {speaker_id}")
             logger.info(f"音调调整: {pitch_adjust}")
+            logger.info(f"扩散步数: {k_step}")
+            logger.info(f"使用浅扩散: {shallow_diffusion}")
+            logger.info(f"使用纯扩散: {only_diffusion}")
+            logger.info(f"聚类推理比例: {cluster_infer_ratio}")
+            logger.info(f"自动预测音高: {auto_predict_f0}")
+            logger.info(f"噪声比例: {noice_scale}")
+            logger.info(f"过滤F0: {f0_filter}")
+            logger.info(f"F0预测器: {f0_predictor}")
+            logger.info(f"增强器自适应键: {enhancer_adaptive_key}")
+            logger.info(f"交叉参考阈值: {cr_threshold}")
 
             start_time = time.time()
             response = self.session.post(

@@ -58,6 +58,66 @@
                 "type": "int",
                 "hint": "默认的音调调整值，范围-12到12",
                 "default": 0
+            },
+            "default_k_step": {
+                "description": "默认扩散步数",
+                "type": "int",
+                "hint": "默认的扩散步数",
+                "default": 100
+            },
+            "default_shallow_diffusion": {
+                "description": "默认使用浅扩散",
+                "type": "boolean",
+                "hint": "是否默认使用浅扩散",
+                "default": true
+            },
+            "default_only_diffusion": {
+                "description": "默认使用纯扩散",
+                "type": "boolean",
+                "hint": "是否默认使用纯扩散",
+                "default": false
+            },
+            "default_cluster_infer_ratio": {
+                "description": "默认聚类推理比例",
+                "type": "float",
+                "hint": "默认的聚类推理比例",
+                "default": 0
+            },
+            "default_auto_predict_f0": {
+                "description": "默认自动预测音高",
+                "type": "boolean",
+                "hint": "是否默认自动预测音高",
+                "default": false
+            },
+            "default_noice_scale": {
+                "description": "默认噪声比例",
+                "type": "float",
+                "hint": "默认的噪声比例",
+                "default": 0.4
+            },
+            "default_f0_filter": {
+                "description": "默认过滤F0",
+                "type": "boolean",
+                "hint": "是否默认过滤F0",
+                "default": false
+            },
+            "default_f0_predictor": {
+                "description": "默认F0预测器",
+                "type": "string",
+                "hint": "默认使用的F0预测器",
+                "default": "fcpe"
+            },
+            "default_enhancer_adaptive_key": {
+                "description": "默认增强器自适应键",
+                "type": "int",
+                "hint": "默认的增强器自适应键值",
+                "default": 0
+            },
+            "default_cr_threshold": {
+                "description": "默认交叉参考阈值",
+                "type": "float",
+                "hint": "默认的交叉参考阈值",
+                "default": 0.05
             }
         }
     }
