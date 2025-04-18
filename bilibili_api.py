@@ -57,7 +57,13 @@ class BilibiliAPI:
             # 构建完整命令
             # BBDown的正确命令格式是: BBDown <url> [command] [options]
             # 我们需要确保URL是第一个参数
-            full_command = [self.bbdown_path]
+            # 在Linux环境中，需要使用./执行本地可执行文件
+            if os.name == 'posix':  # Linux/Unix系统
+                bbdown_executable = f"./{self.bbdown_path}"
+            else:  # Windows系统
+                bbdown_executable = self.bbdown_path
+                
+            full_command = [bbdown_executable]
             
             # 如果有cookie，添加cookie参数
             if self.bbdown_cookie:
