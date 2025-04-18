@@ -115,10 +115,21 @@ class QQMusicAPI:
                 # 获取QQ登录二维码
                 qr = await get_qrcode(QRLoginType.QQ)
                 
-                # 将二维码转换为base64
-                buffered = BytesIO()
-                qr.save(buffered)
-                qr_base64 = base64.b64encode(buffered.getvalue()).decode()
+                # 保存二维码到临时文件
+                temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+                qr_path = os.path.join(temp_dir, "login_qr.png")
+                qr.save(qr_path)
+                
+                # 读取文件并转换为base64
+                with open(qr_path, "rb") as f:
+                    qr_base64 = base64.b64encode(f.read()).decode()
+                
+                # 删除临时文件
+                try:
+                    os.remove(qr_path)
+                except:
+                    pass
                 
                 # 输出二维码的base64数据
                 logger.info("请复制以下链接到浏览器打开二维码:")
