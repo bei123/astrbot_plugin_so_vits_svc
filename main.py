@@ -179,7 +179,7 @@ class VoiceConverter:
         self.netease_api = NeteaseMusicAPI(self.config)
         self.bilibili_api = BilibiliAPI(self.config)
         self.qqmusic_api = QQMusicAPI(self.config)
-        
+
         # 初始化缓存管理器
         cache_config = self.config.get("cache_config", {})
         self.cache_manager = CacheManager(
@@ -225,7 +225,7 @@ class VoiceConverter:
 
             try:
                 self.current_task = asyncio.current_task()
-                
+
                 # 使用默认值
                 speaker_id = speaker_id or self.default_speaker
                 pitch_adjust = pitch_adjust if pitch_adjust is not None else self.default_pitch
@@ -239,7 +239,7 @@ class VoiceConverter:
                 f0_predictor = f0_predictor or self.default_f0_predictor
                 enhancer_adaptive_key = enhancer_adaptive_key if enhancer_adaptive_key is not None else self.default_enhancer_adaptive_key
                 cr_threshold = cr_threshold if cr_threshold is not None else self.default_cr_threshold
-                
+
                 # 检查缓存
                 cache_params = {
                     "k_step": k_step,
@@ -253,14 +253,14 @@ class VoiceConverter:
                     "enhancer_adaptive_key": enhancer_adaptive_key,
                     "cr_threshold": cr_threshold
                 }
-                
+
                 cached_file = self.cache_manager.get_cache(
                     input_wav,
                     speaker_id,
                     pitch_adjust,
                     **cache_params
                 )
-                
+
                 if cached_file:
                     logger.info(f"使用缓存: {cached_file}")
                     # 复制缓存文件到输出路径
@@ -287,7 +287,7 @@ class VoiceConverter:
                     enhancer_adaptive_key,
                     cr_threshold,
                 )
-                
+
                 # 如果转换成功，保存到缓存
                 if success:
                     self.cache_manager.save_cache(
@@ -297,9 +297,9 @@ class VoiceConverter:
                         pitch_adjust,
                         **cache_params
                     )
-                
+
                 return success
-                
+
             finally:
                 self.current_task = None
 
@@ -674,22 +674,22 @@ class SoVitsSvcPlugin(Star):
             if source_type == "bilibili" and song_name:
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
-                    
+
                     # 检查BBDown配置
                     if not self.converter.bilibili_api.bbdown_path:
                         yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
                         return
-                        
+
                     # 检查BBDown是否存在
                     if not os.path.exists(self.converter.bilibili_api.bbdown_path):
                         yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
                         return
-                        
+
                     # 检查BBDown是否有执行权限
                     if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
                         yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
                         return
-                    
+
                     video_info = self.converter.bilibili_api.process_video(song_name)
 
                     if not video_info:
@@ -717,39 +717,39 @@ class SoVitsSvcPlugin(Star):
             elif source_type == "qqmusic" and song_name:
                 try:
                     yield event.plain_result(f"正在搜索QQ音乐：{song_name}...")
-                    
+
                     # 确保QQ音乐已登录
                     if not await self.converter.qqmusic_api.ensure_login():
                         yield event.plain_result("QQ音乐登录失败，请检查配置或重新登录")
                         return
-                    
+
                     song_info = await self.converter.qqmusic_api.get_song_with_highest_quality(song_name)
-                    
+
                     if not song_info:
                         yield event.plain_result(f"未找到QQ音乐歌曲：{song_name}")
                         return
-                        
+
                     if not song_info.get("url"):
                         yield event.plain_result("无法获取QQ音乐下载链接，可能是版权限制")
                         return
-                        
+
                     yield event.plain_result(
                         f"找到QQ音乐歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
                         f"音质：{song_info.get('level', '未知音质')}\n"
                         f"正在下载..."
                     )
-                    
+
                     downloaded_file = await self.converter.qqmusic_api.download_song(song_info, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载QQ音乐歌曲失败！")
                         return
-                        
+
                     if os.path.exists(downloaded_file):
                         os.rename(downloaded_file, input_file)
                     else:
                         yield event.plain_result("下载的QQ音乐文件不存在！")
                         return
-                        
+
                 except Exception as e:
                     logger.error(f"处理QQ音乐时出错: {str(e)}")
                     yield event.plain_result(f"搜索/下载QQ音乐歌曲时出错：{str(e)}")
@@ -984,7 +984,7 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"获取预设列表失败：{str(e)}")
 
-    
+
     @command("bilibili_info")
     async def get_bilibili_info(self, event: AstrMessageEvent):
         """获取哔哩哔哩视频信息
@@ -993,52 +993,52 @@ class SoVitsSvcPlugin(Star):
         """
         message = event.message_str.strip()
         args = message.split()[1:] if message else []
-        
+
         if not args:
             yield event.plain_result("请提供视频BV号或链接！\n用法：/bilibili_info [BV号或链接]")
             return
-            
+
         url_or_bvid = args[0]
-            
+
         try:
             yield event.plain_result(f"正在获取视频信息：{url_or_bvid}...")
-            
+
             # 检查BBDown配置
             if not self.converter.bilibili_api.bbdown_path:
                 yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
                 return
-                
+
             # 检查BBDown是否存在
             if not os.path.exists(self.converter.bilibili_api.bbdown_path):
                 yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
                 return
-                
+
             # 检查BBDown是否有执行权限
             if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
                 yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
                 return
-            
+
             video_info = self.converter.bilibili_api.get_video_info(url_or_bvid)
-            
+
             if not video_info:
                 yield event.plain_result(f"获取视频信息失败：{url_or_bvid}")
                 return
-                
-            result = f"视频信息：\n"
+
+            result = "视频信息：\n"
             result += f"标题：{video_info['title']}\n"
             result += f"UP主：{video_info['uploader']}\n"
             result += f"分P数量：{len(video_info['parts'])}\n\n"
-            
-            if video_info['parts']:
+
+            if video_info["parts"]:
                 result += "分P列表：\n"
-                for part in video_info['parts']:
+                for part in video_info["parts"]:
                     result += f"{part['index']}. {part['title']} ({part['duration']})\n"
-                    
+
             result += "\n使用方法：\n"
             result += f"/convert_voice [说话人ID] [音调调整] bilibili {url_or_bvid}"
-            
+
             yield event.plain_result(result)
-            
+
         except Exception as e:
             logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}")
             yield event.plain_result(f"获取视频信息时出错：{str(e)}")
@@ -1061,45 +1061,45 @@ class SoVitsSvcPlugin(Star):
         """
         message = event.message_str.strip()
         args = message.split()[1:] if message else []
-        
+
         if not args:
             yield event.plain_result("请提供歌曲名！\n用法：/qqmusic_info [歌曲名]")
             return
-            
+
         song_name = " ".join(args)
-            
+
         try:
             yield event.plain_result(f"正在搜索QQ音乐歌曲：{song_name}...")
-            
+
             # 确保QQ音乐已登录
             if not await self.converter.qqmusic_api.ensure_login():
                 yield event.plain_result("QQ音乐登录失败，请检查配置或重新登录")
                 return
-            
+
             # 搜索歌曲
             search_results = await self.converter.qqmusic_api.search(song_name, limit=5)
-            
+
             if not search_results:
                 yield event.plain_result(f"未找到QQ音乐歌曲：{song_name}")
                 return
-                
+
             result = f"找到 {len(search_results)} 首相关歌曲：\n\n"
-            
+
             for i, song in enumerate(search_results, 1):
-                song_name = song.get('name', '未知歌曲')
-                singer_name = song.get('singer', [{}])[0].get('name', '未知歌手')
-                album_name = song.get('album', {}).get('name', '未知专辑')
-                duration = song.get('interval', '未知时长')
-                
+                song_name = song.get("name", "未知歌曲")
+                singer_name = song.get("singer", [{}])[0].get("name", "未知歌手")
+                album_name = song.get("album", {}).get("name", "未知专辑")
+                duration = song.get("interval", "未知时长")
+
                 result += f"{i}. {song_name} - {singer_name}\n"
                 result += f"   专辑：{album_name}\n"
                 result += f"   时长：{duration}秒\n\n"
-                
+
             result += "使用方法：\n"
             result += f"/convert_voice [说话人ID] [音调调整] qq {song_name}"
-            
+
             yield event.plain_result(result)
-            
+
         except Exception as e:
             logger.error(f"获取QQ音乐歌曲信息出错: {str(e)}")
             yield event.plain_result(f"获取QQ音乐歌曲信息时出错：{str(e)}")

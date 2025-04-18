@@ -7,10 +7,7 @@
 """
 
 import os
-import json
-import requests
 import subprocess
-import tempfile
 import re
 import time
 from typing import Dict, Optional, List, Tuple
@@ -32,7 +29,7 @@ class BilibiliAPI:
         self.bbdown_cookie = self.base_setting.get("bbdown_cookie", "")
         self.temp_dir = os.path.join("data", "temp", "bilibili")
         os.makedirs(self.temp_dir, exist_ok=True)
-        
+
         # 临时文件清理设置
         self.max_temp_age = 24 * 60 * 60  # 临时文件最大保存时间（24小时）
         self.cleanup_temp_files()  # 初始化时清理旧的临时文件
@@ -70,30 +67,30 @@ class BilibiliAPI:
                 error_msg = f"BBDown可执行文件不存在: {self.bbdown_path}"
                 logger.error(error_msg)
                 return -1, "", error_msg
-                
+
             # 检查文件是否有执行权限
             if not os.access(self.bbdown_path, os.X_OK):
                 error_msg = f"BBDown可执行文件没有执行权限: {self.bbdown_path}"
                 logger.error(error_msg)
                 return -1, "", error_msg
-            
+
             # 构建完整命令字符串
             # 使用shell=True，让系统通过shell来执行命令
             cmd_str = f'"{self.bbdown_path}"'
-            
+
             # 如果有cookie，添加cookie参数
             if self.bbdown_cookie:
                 cmd_str += f' -c "{self.bbdown_cookie}"'
-            
+
             # 添加其他参数
             for arg in command:
-                if ' ' in arg:
+                if " " in arg:
                     cmd_str += f' "{arg}"'
                 else:
-                    cmd_str += f' {arg}'
-            
+                    cmd_str += f" {arg}"
+
             logger.info(f"执行BBDown命令: {cmd_str}")
-            
+
             # 执行命令
             result = subprocess.run(
                 cmd_str,
@@ -102,9 +99,9 @@ class BilibiliAPI:
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
+
             return result.returncode, result.stdout, result.stderr
-            
+
         except Exception as e:
             logger.error(f"执行BBDown命令出错: {str(e)}")
             return -1, "", str(e)
@@ -119,17 +116,17 @@ class BilibiliAPI:
             提取的BV号，如果无法提取则返回None
         """
         # 如果已经是BV号格式
-        if re.match(r'^BV[a-zA-Z0-9]+$', url_or_bvid):
+        if re.match(r"^BV[a-zA-Z0-9]+$", url_or_bvid):
             return url_or_bvid
-            
+
         # 尝试从URL中提取BV号
-        bvid_pattern = r'BV[a-zA-Z0-9]+'
+        bvid_pattern = r"BV[a-zA-Z0-9]+"
         match = re.search(bvid_pattern, url_or_bvid)
         if match:
             return match.group(0)
-            
+
         # 尝试从URL中提取av号
-        av_pattern = r'av(\d+)'
+        av_pattern = r"av(\d+)"
         match = re.search(av_pattern, url_or_bvid)
         if match:
             av_id = match.group(1)
@@ -139,7 +136,7 @@ class BilibiliAPI:
                 bvid_match = re.search(bvid_pattern, stdout)
                 if bvid_match:
                     return bvid_match.group(0)
-                    
+
         return None
 
     def get_video_info(self, url_or_bvid: str) -> Optional[Dict]:
@@ -157,24 +154,24 @@ class BilibiliAPI:
             if not bvid:
                 logger.error(f"无法从 {url_or_bvid} 中提取BV号")
                 return None
-                
+
             # 构建URL
             if not url_or_bvid.startswith("http"):
                 url = f"https://www.bilibili.com/video/{bvid}"
             else:
                 url = url_or_bvid
-                
+
             # 使用BBDown的info功能
             # 根据BBDown文档，正确的命令格式是: BBDown <url> -info
             # 注意：URL必须放在第一个参数位置，-info放在URL后面
             logger.info(f"尝试获取视频信息: {url}")
             returncode, stdout, stderr = self._run_bbdown([url, "-info"])
-            
+
             if returncode != 0:
                 logger.error(f"获取视频信息失败: 返回码={returncode}, 错误信息={stderr}")
                 logger.error(f"标准输出: {stdout}")
                 return None
-            
+
             # 解析视频信息
             info = {
                 "bvid": bvid,
@@ -182,16 +179,16 @@ class BilibiliAPI:
                 "uploader": "",
                 "parts": []
             }
-            
-            lines = stdout.strip().split('\n')
+
+            lines = stdout.strip().split("\n")
             for line in lines:
                 if "标题:" in line:
                     info["title"] = line.split("标题:", 1)[1].strip()
                 elif "UP主:" in line:
                     info["uploader"] = line.split("UP主:", 1)[1].strip()
-                elif re.match(r'^\d+\.', line):
+                elif re.match(r"^\d+\.", line):
                     # 解析分P信息
-                    part_match = re.match(r'^(\d+)\.\s+(.+?)\s+\((\d+:\d+)\)$', line)
+                    part_match = re.match(r"^(\d+)\.\s+(.+?)\s+\((\d+:\d+)\)$", line)
                     if part_match:
                         part_index, part_title, duration = part_match.groups()
                         info["parts"].append({
@@ -199,14 +196,14 @@ class BilibiliAPI:
                             "title": part_title,
                             "duration": duration
                         })
-            
+
             # 检查是否成功解析到标题
             if not info["title"]:
                 logger.error(f"无法解析视频标题，原始输出: {stdout}")
                 return None
-                
+
             return info
-            
+
         except Exception as e:
             logger.error(f"获取视频信息出错: {str(e)}")
             import traceback
@@ -227,55 +224,55 @@ class BilibiliAPI:
         try:
             # 清理过期的临时文件
             self.cleanup_temp_files()
-            
+
             # 提取BV号
             bvid = self.extract_bvid(url_or_bvid)
             if not bvid:
                 logger.error(f"无法从 {url_or_bvid} 中提取BV号")
                 return None
-                
+
             # 构建URL
             if not url_or_bvid.startswith("http"):
                 url = f"https://www.bilibili.com/video/{bvid}"
             else:
                 url = url_or_bvid
-                
+
             # 设置输出目录
             if not output_dir:
                 output_dir = self.temp_dir
-            
+
             # 构建命令
             # 根据BBDown文档，正确的命令格式是: BBDown <url> --audio-only [options]
             # 注意：URL必须放在第一个参数位置
             command = [url, "--audio-only"]
-            
+
             # 添加工作目录参数
             command.extend(["--work-dir", output_dir])
-            
+
             # 如果指定了分P，添加分P参数
             if part_index is not None:
                 command.extend(["-p", str(part_index)])
-            
+
             # 执行下载
             returncode, stdout, stderr = self._run_bbdown(command)
-            
+
             if returncode != 0:
                 logger.error(f"下载音频失败: {stderr}")
                 return None
-            
+
             # 查找下载的文件
             # BBDown通常会将文件保存在指定目录下，文件名格式为: 标题_音频.m4a
             files = os.listdir(output_dir)
-            audio_files = [f for f in files if f.endswith('.m4a')]
-            
+            audio_files = [f for f in files if f.endswith(".m4a")]
+
             if not audio_files:
                 logger.error("未找到下载的音频文件")
                 return None
-            
+
             # 返回最新下载的文件路径
             latest_file = max([os.path.join(output_dir, f) for f in audio_files], key=os.path.getctime)
             return latest_file
-            
+
         except Exception as e:
             logger.error(f"下载音频出错: {str(e)}")
             return None
@@ -292,21 +289,21 @@ class BilibiliAPI:
         try:
             # 清理过期的临时文件
             self.cleanup_temp_files()
-            
+
             # 获取视频信息
             video_info = self.get_video_info(url_or_bvid)
             if not video_info:
                 return None
-                
+
             # 下载音频
             audio_file = self.download_audio(url_or_bvid)
             if not audio_file:
                 return None
-                
+
             # 添加音频文件路径到视频信息中
             video_info["audio_file"] = audio_file
             return video_info
-            
+
         except Exception as e:
             logger.error(f"处理视频时出错: {str(e)}")
             return None
@@ -324,27 +321,27 @@ class BilibiliAPI:
         try:
             # 清理过期的临时文件
             self.cleanup_temp_files()
-            
+
             if not video_info or not video_info.get("audio_file"):
                 return None
-                
+
             if not save_path:
                 save_path = self.temp_dir
-                
+
             # 构建目标文件路径
             source_file = video_info["audio_file"]
             target_file = os.path.join(save_path, os.path.basename(source_file))
-            
+
             # 如果源文件和目标文件相同，直接返回
             if os.path.abspath(source_file) == os.path.abspath(target_file):
                 return source_file
-                
+
             # 复制文件
             import shutil
             shutil.copy2(source_file, target_file)
-            
+
             return target_file
-            
+
         except Exception as e:
             logger.error(f"下载歌曲时出错: {str(e)}")
             return None
@@ -353,20 +350,20 @@ class BilibiliAPI:
 # 使用示例
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="哔哩哔哩API工具")
     parser.add_argument("url_or_bvid", help="哔哩哔哩视频URL或BV号")
     parser.add_argument("--download", action="store_true", help="下载音频")
     parser.add_argument("--save-path", help="保存路径")
-    
+
     args = parser.parse_args()
-    
+
     # 创建API实例
     api = BilibiliAPI()
-    
+
     # 处理视频
     video = api.process_video(args.url_or_bvid)
-    
+
     # 如果需要下载音频
     if args.download and video:
-        api.download_song(video, args.save_path) 
+        api.download_song(video, args.save_path)

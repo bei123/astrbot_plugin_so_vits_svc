@@ -20,23 +20,21 @@ from .QQapi.qqmusic_api import search, song
 from .QQapi.qqmusic_api.login import get_qrcode, check_qrcode, QRLoginType, QRCodeLoginEvents
 from .QQapi.qqmusic_api.utils.credential import Credential
 from quart import Quart, Response
-import aiohttp
 from aiohttp import web
-from io import BytesIO
 
 
 class QQMusicRoute:
     def __init__(self, app: Quart):
         self.app = app
         self.app.add_url_rule("/qqmusic/qr", view_func=self.get_qr, methods=["GET"])
-        
+
     async def get_qr(self):
         """获取QQ音乐登录二维码"""
         try:
             qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
             if not os.path.exists(qr_path):
                 return Response("二维码不存在", status=404)
-                
+
             with open(qr_path, "rb") as f:
                 return Response(f.read(), mimetype="image/png")
         except Exception as e:
@@ -55,8 +53,8 @@ class QQMusicAPI:
         """
         self.config = config or {}
         self.credential_file = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), 
-            "QQapi", 
+            os.path.dirname(os.path.abspath(__file__)),
+            "QQapi",
             "qqmusic_credential.json"
         )
         self.credential = None
@@ -67,11 +65,11 @@ class QQMusicAPI:
     async def start_qr_server(self):
         """启动二维码服务器"""
         app = web.Application()
-        app.router.add_get('/qr', self.handle_qr)
-        
+        app.router.add_get("/qr", self.handle_qr)
+
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, 'localhost', self.qr_server_port)
+        site = web.TCPSite(runner, "localhost", self.qr_server_port)
         await site.start()
         self.qr_server = runner
         logger.info(f"二维码服务器已启动: http://localhost:{self.qr_server_port}/qr")
@@ -88,7 +86,7 @@ class QQMusicAPI:
             qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
             if not os.path.exists(qr_path):
                 return web.Response(text="二维码不存在", status=404)
-                
+
             with open(qr_path, "rb") as f:
                 return web.Response(body=f.read(), content_type="image/png")
         except Exception as e:
@@ -97,10 +95,8 @@ class QQMusicAPI:
 
     def _cleanup_qr_path(self, qr_path: str) -> bool:
         """清理二维码路径
-        
         Args:
             qr_path: 二维码文件路径
-            
         Returns:
             bool: 是否清理成功
         """
@@ -122,19 +118,17 @@ class QQMusicAPI:
 
     def _get_latest_qr_file(self, qr_dir: str) -> str:
         """获取目录中最新的二维码文件
-        
         Args:
             qr_dir: 二维码目录路径
-            
         Returns:
             str: 最新二维码文件的完整路径
         """
         try:
             # 获取目录中所有的png文件
-            qr_files = [f for f in os.listdir(qr_dir) if f.endswith('.png')]
+            qr_files = [f for f in os.listdir(qr_dir) if f.endswith(".png")]
             if not qr_files:
                 return None
-                
+
             # 按修改时间排序，获取最新的文件
             latest_file = max(qr_files, key=lambda f: os.path.getmtime(os.path.join(qr_dir, f)))
             return os.path.join(qr_dir, latest_file)
@@ -151,25 +145,25 @@ class QQMusicAPI:
         async with self.credential_lock:
             if self.credential:
                 return True
-                
+
             # 尝试加载已保存的凭证
             self.credential = self._load_credential()
             if self.credential:
                 logger.info("已加载保存的QQ音乐登录凭证")
                 return True
-                
+
             # 需要重新登录
             logger.info("正在获取QQ音乐登录二维码...")
             try:
                 # 获取QQ登录二维码
                 qr = await get_qrcode(QRLoginType.QQ)
-                
+
                 # 保存二维码到QQapi目录
                 qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
-                
+
                 # 确保目录存在
                 os.makedirs(qr_dir, exist_ok=True)
-                
+
                 # 保存新二维码
                 try:
                     qr.save(qr_dir)
@@ -177,25 +171,25 @@ class QQMusicAPI:
                 except Exception as e:
                     logger.error(f"保存二维码失败: {str(e)}")
                     return False
-                
+
                 # 获取最新的二维码文件并转换为base64
                 try:
                     latest_qr_file = self._get_latest_qr_file(qr_dir)
                     if not latest_qr_file:
                         logger.error("未找到二维码文件")
                         return False
-                        
+
                     with open(latest_qr_file, "rb") as f:
                         qr_base64 = base64.b64encode(f.read()).decode()
                 except Exception as e:
                     logger.error(f"读取二维码文件失败: {str(e)}")
                     return False
-                
+
                 # 输出二维码的base64数据
                 logger.info("请复制以下链接到浏览器打开二维码:")
                 logger.info(f"data:image/png;base64,{qr_base64}")
                 logger.info("请使用QQ音乐APP扫描二维码")
-                
+
                 # 等待扫码
                 while True:
                     event, credential = await check_qrcode(qr)
@@ -254,7 +248,7 @@ class QQMusicAPI:
         if not await self.ensure_login():
             logger.error("QQ音乐未登录，无法搜索")
             return []
-            
+
         try:
             search_result = await search.search_by_type(keyword=keyword, num=limit)
             return search_result or []
@@ -275,7 +269,7 @@ class QQMusicAPI:
         if not await self.ensure_login():
             logger.error("QQ音乐未登录，无法获取下载链接")
             return None
-            
+
         try:
             # 如果未指定音质类型，则尝试不同音质
             if file_type is None:
@@ -292,7 +286,7 @@ class QQMusicAPI:
                     song.SongFileType.ACC_96,    # 96kbps
                     song.SongFileType.ACC_48     # 48kbps
                 ]
-                
+
                 for ft in file_types:
                     try:
                         urls = await song.get_song_urls(
@@ -302,9 +296,9 @@ class QQMusicAPI:
                         )
                         if urls and urls.get(song_mid):
                             return urls[song_mid]
-                    except:
+                    except Exception:
                         continue
-                
+
                 return None
             else:
                 # 使用指定的音质类型
@@ -314,7 +308,7 @@ class QQMusicAPI:
                     file_type=file_type
                 )
                 return urls.get(song_mid) if urls else None
-                
+
         except Exception as e:
             logger.error(f"获取QQ音乐下载链接出错: {str(e)}")
             return None
@@ -379,17 +373,17 @@ class QQMusicAPI:
         search_results = await self.search(keyword, limit=1)
         if not search_results:
             return None
-            
+
         song_info = search_results[0]
-        song_mid = song_info['mid']
-        song_name = song_info['name']
-        singer_name = song_info.get('singer', [{}])[0].get('name', '未知歌手')
-        
+        song_mid = song_info["mid"]
+        song_name = song_info["name"]
+        singer_name = song_info.get("singer", [{}])[0].get("name", "未知歌手")
+
         # 尝试获取下载链接
         url = await self.get_song_url(song_mid)
         if not url:
             return None
-            
+
         # 获取音质信息
         file_types = [
             song.SongFileType.MASTER,
@@ -404,7 +398,7 @@ class QQMusicAPI:
             song.SongFileType.ACC_96,
             song.SongFileType.ACC_48
         ]
-        
+
         used_type = None
         for file_type in file_types:
             try:
@@ -416,12 +410,12 @@ class QQMusicAPI:
                 if urls and urls.get(song_mid):
                     used_type = file_type
                     break
-            except:
+            except Exception:
                 continue
-                
+
         if not used_type:
             return None
-            
+
         # 构建返回信息
         return {
             "name": song_name,
@@ -445,16 +439,16 @@ class QQMusicAPI:
         """
         if not song_info or not song_info.get("url"):
             return None
-            
+
         if not save_path:
             save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
             os.makedirs(save_path, exist_ok=True)
-            
+
         try:
             song_name = song_info.get("name", "未知歌曲")
             extension = song_info.get("extension", ".mp3")
             file_path = os.path.join(save_path, f"{song_name}{extension}")
-            
+
             async with httpx.AsyncClient() as client:
                 async with client.stream("GET", song_info["url"]) as response:
                     response.raise_for_status()
@@ -462,8 +456,8 @@ class QQMusicAPI:
                         async for chunk in response.aiter_bytes(1024 * 5):
                             if chunk:
                                 await f.write(chunk)
-                                
+
             return file_path
         except Exception as e:
             logger.error(f"下载QQ音乐歌曲出错: {str(e)}")
-            return None 
+            return None

@@ -71,7 +71,7 @@ class CacheManager:
             # 读取文件内容的前1MB用于计算哈希
             with open(input_file, "rb") as f:
                 file_content = f.read(1024*1024)
-            
+
             # 组合所有参数
             params = {
                 "file_hash": hashlib.md5(file_content).hexdigest(),
@@ -79,11 +79,11 @@ class CacheManager:
                 "pitch_adjust": str(pitch_adjust)
             }
             params.update({k: str(v) for k, v in kwargs.items()})
-            
+
             # 生成参数字符串并计算哈希
             params_str = json.dumps(params, sort_keys=True)
             return hashlib.md5(params_str.encode()).hexdigest()
-            
+
         except Exception as e:
             logger.error(f"生成缓存键失败: {str(e)}")
             return None
@@ -99,7 +99,7 @@ class CacheManager:
             # 检查所有缓存文件
             for cache_key, cache_info in list(index.items()):
                 cache_file = os.path.join(self.cache_dir, cache_key + ".wav")
-                
+
                 # 如果缓存文件不存在，从索引中删除
                 if not os.path.exists(cache_file):
                     del index[cache_key]
@@ -108,13 +108,13 @@ class CacheManager:
                 # 获取文件信息
                 file_size = os.path.getsize(cache_file)
                 file_age = current_time - cache_info["timestamp"]
-                
+
                 # 如果文件过期，删除它
                 if file_age > self.max_cache_age:
                     os.remove(cache_file)
                     del index[cache_key]
                     continue
-                
+
                 # 添加到缓存文件列表
                 cache_files.append((cache_key, file_size, cache_info["timestamp"]))
                 total_size += file_size
@@ -123,12 +123,12 @@ class CacheManager:
             if total_size > self.max_cache_size:
                 # 按时间戳排序，最旧的在前面
                 cache_files.sort(key=lambda x: x[2])
-                
+
                 # 删除旧文件直到总大小小于限制
                 for cache_key, file_size, _ in cache_files:
                     if total_size <= self.max_cache_size:
                         break
-                        
+
                     cache_file = os.path.join(self.cache_dir, cache_key + ".wav")
                     os.remove(cache_file)
                     del index[cache_key]
@@ -136,7 +136,7 @@ class CacheManager:
 
             # 保存更新后的索引
             self._save_index(index)
-            
+
         except Exception as e:
             logger.error(f"清理缓存失败: {str(e)}")
 
@@ -156,19 +156,19 @@ class CacheManager:
             cache_key = self._generate_cache_key(input_file, speaker_id, pitch_adjust, **kwargs)
             if not cache_key:
                 return None
-                
+
             index = self._load_index()
             if cache_key not in index:
                 return None
-                
+
             cache_file = os.path.join(self.cache_dir, cache_key + ".wav")
             if not os.path.exists(cache_file):
                 del index[cache_key]
                 self._save_index(index)
                 return None
-                
+
             return cache_file
-            
+
         except Exception as e:
             logger.error(f"获取缓存失败: {str(e)}")
             return None
@@ -190,11 +190,11 @@ class CacheManager:
             cache_key = self._generate_cache_key(input_file, speaker_id, pitch_adjust, **kwargs)
             if not cache_key:
                 return None
-                
+
             # 复制输出文件到缓存目录
             cache_file = os.path.join(self.cache_dir, cache_key + ".wav")
             shutil.copy2(output_file, cache_file)
-            
+
             # 更新索引
             index = self._load_index()
             index[cache_key] = {
@@ -205,12 +205,12 @@ class CacheManager:
                 "params": kwargs
             }
             self._save_index(index)
-            
+
             # 清理过期缓存
             self._clean_expired_cache()
-            
+
             return cache_file
-            
+
         except Exception as e:
             logger.error(f"保存缓存失败: {str(e)}")
             return None
@@ -223,10 +223,10 @@ class CacheManager:
                 file_path = os.path.join(self.cache_dir, file)
                 if os.path.isfile(file_path):
                     os.remove(file_path)
-            
+
             # 重置索引
             self._save_index({})
             logger.info("缓存已清空")
-            
+
         except Exception as e:
-            logger.error(f"清空缓存失败: {str(e)}") 
+            logger.error(f"清空缓存失败: {str(e)}")
