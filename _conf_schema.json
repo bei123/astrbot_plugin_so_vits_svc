@@ -146,13 +146,13 @@
             },
             "max_cache_size": {
                 "description": "最大缓存大小(字节)",
-                "type": "integer",
+                "type": "int",
                 "hint": "缓存的最大容量，默认1GB",
                 "default": 1073741824
             },
             "max_cache_age": {
                 "description": "最大缓存时间(秒)",
-                "type": "integer",
+                "type": "int",
                 "hint": "缓存文件的最大保存时间，默认7天",
                 "default": 604800
             }
