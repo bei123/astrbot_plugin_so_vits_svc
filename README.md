@@ -190,6 +190,17 @@
    如果遇到权限问题，请检查 BBDown 的安装路径和权限设置。
 9. 使用 BBDown 时，请确保使用正确的命令格式。BBDown 通常需要完整的 URL 或正确格式的 BV 号。如果遇到 "Unrecognized command or argument" 错误，请尝试使用完整的 URL 格式，例如 `https://www.bilibili.com/video/BV1xx411c7mD`。
 
+2. BBDown 命令格式说明：
+   - 正确的命令格式为：`BBDown <url> [command] [options]`
+   - 例如：`BBDown https://www.bilibili.com/video/BV1YYdAYVEtT --info`
+   - 注意：URL 必须放在命令参数之前
+
+3. 如果遇到问题，请检查：
+   - BBDown 是否正确安装
+   - 安装路径是否正确配置
+   - 可执行文件是否具有正确的权限
+   - 命令格式是否正确
+
 ## 问题反馈
 
 如果遇到问题，请检查：

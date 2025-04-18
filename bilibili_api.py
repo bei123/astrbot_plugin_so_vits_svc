@@ -42,15 +42,6 @@ class BilibiliAPI:
             返回码、标准输出和标准错误
         """
         try:
-            # 构建完整命令
-            full_command = [self.bbdown_path] + command
-            
-            # 如果有cookie，添加cookie参数
-            if self.bbdown_cookie:
-                full_command.extend(["-c", self.bbdown_cookie])
-            
-            logger.info(f"执行BBDown命令: {' '.join(full_command)}")
-            
             # 检查文件是否存在
             if not os.path.exists(self.bbdown_path):
                 error_msg = f"BBDown可执行文件不存在: {self.bbdown_path}"
@@ -62,6 +53,20 @@ class BilibiliAPI:
                 error_msg = f"BBDown可执行文件没有执行权限: {self.bbdown_path}"
                 logger.error(error_msg)
                 return -1, "", error_msg
+            
+            # 构建完整命令
+            # BBDown的正确命令格式是: BBDown <url> [command] [options]
+            # 我们需要确保URL是第一个参数
+            full_command = [self.bbdown_path]
+            
+            # 如果有cookie，添加cookie参数
+            if self.bbdown_cookie:
+                full_command.extend(["-c", self.bbdown_cookie])
+            
+            # 添加其他参数
+            full_command.extend(command)
+            
+            logger.info(f"执行BBDown命令: {' '.join(full_command)}")
             
             # 执行命令
             process = subprocess.Popen(
@@ -127,21 +132,19 @@ class BilibiliAPI:
                 logger.error(f"无法从 {url_or_bvid} 中提取BV号")
                 return None
                 
+            # 构建URL
+            if not url_or_bvid.startswith("http"):
+                url = f"https://www.bilibili.com/video/{bvid}"
+            else:
+                url = url_or_bvid
+                
             # 使用BBDown的info功能
-            # 注意：BBDown命令格式应该是 BBDown --info [URL或BV号]
-            # 确保使用正确的命令格式
-            returncode, stdout, stderr = self._run_bbdown(["--info", bvid])
+            # 根据BBDown文档，正确的命令格式是: BBDown <url> --info
+            returncode, stdout, stderr = self._run_bbdown([url, "--info"])
             
             if returncode != 0:
-                # 尝试使用URL格式
-                if not url_or_bvid.startswith("http"):
-                    url = f"https://www.bilibili.com/video/{bvid}"
-                    logger.info(f"尝试使用URL格式: {url}")
-                    returncode, stdout, stderr = self._run_bbdown(["--info", url])
-                
-                if returncode != 0:
-                    logger.error(f"获取视频信息失败: {stderr}")
-                    return None
+                logger.error(f"获取视频信息失败: {stderr}")
+                return None
             
             # 解析视频信息
             info = {
@@ -192,25 +195,26 @@ class BilibiliAPI:
                 logger.error(f"无法从 {url_or_bvid} 中提取BV号")
                 return None
                 
+            # 构建URL
+            if not url_or_bvid.startswith("http"):
+                url = f"https://www.bilibili.com/video/{bvid}"
+            else:
+                url = url_or_bvid
+                
             # 设置输出目录
             if not output_dir:
                 output_dir = self.temp_dir
             
             # 构建命令
-            command = ["--audio-only", "--work-dir", output_dir]
+            # 根据BBDown文档，正确的命令格式是: BBDown <url> --audio-only [options]
+            command = [url, "--audio-only"]
+            
+            # 添加工作目录参数
+            command.extend(["--work-dir", output_dir])
             
             # 如果指定了分P，添加分P参数
             if part_index is not None:
                 command.extend(["-p", str(part_index)])
-            
-            # 添加视频ID
-            # 尝试使用URL格式，这通常更可靠
-            if not url_or_bvid.startswith("http"):
-                url = f"https://www.bilibili.com/video/{bvid}"
-                logger.info(f"使用URL格式: {url}")
-                command.append(url)
-            else:
-                command.append(url_or_bvid)
             
             # 执行下载
             returncode, stdout, stderr = self._run_bbdown(command)
