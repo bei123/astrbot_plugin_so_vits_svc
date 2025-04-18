@@ -117,7 +117,7 @@ class QQMusicAPI:
                 
                 # 将二维码转换为base64
                 buffered = BytesIO()
-                qr.save(buffered, format="PNG")
+                qr.save(buffered)
                 qr_base64 = base64.b64encode(buffered.getvalue()).decode()
                 
                 # 输出二维码的base64数据
