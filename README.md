@@ -7,6 +7,7 @@
 - 支持语音转换（WAV格式）
 - 支持 MSST 音频预处理
 - 支持网易云音乐歌曲下载和转换
+- 支持QQ音乐歌曲下载和转换
 - 支持哔哩哔哩视频音频下载和转换
 - 支持转换结果缓存，提高重复转换效率
 - 可配置的API服务器地址
@@ -48,6 +49,10 @@
 - `bbdown_path`: BBDown可执行文件路径
   - 默认值: `BBDown`
   - 说明: BBDown可执行文件的路径，如果已添加到PATH中，可以直接使用BBDown
+
+- `qqmusic_credential`: QQ音乐登录凭证
+  - 默认值: 空
+  - 说明: QQ音乐登录凭证，首次使用时会自动生成二维码进行登录
 
 - `bbdown_cookie`: 哔哩哔哩Cookie
   - 默认值: 空
@@ -157,6 +162,13 @@
 ```
 获取指定BV号或链接的视频详细信息，包括标题、UP主、分P信息等。
 
+### 查询歌曲信息
+
+1. 查询QQ音乐歌曲信息：
+   ```
+   /qqmusic_info [歌曲名]
+   ```
+
 ### 转换语音
 ```
 /convert_voice [说话人ID] [音调调整] [歌曲名]
@@ -173,6 +185,7 @@
 /convert_voice 0 0 起风了  # 搜索并转换网易云音乐中的"起风了"
 /convert_voice 0 0 bilibili BV1xx411c7mD  # 转换哔哩哔哩视频
 /convert_voice 0 0 bilibili https://www.bilibili.com/video/BV1xx411c7mD  # 转换哔哩哔哩视频
+/convert_voice 0 0 qq 起风了  # 搜索并转换QQ音乐中的"起风了"
 ```
 
 注意：
@@ -181,6 +194,7 @@
 - 转换完成后会自动发送转换后的音频文件
 - 使用网易云音乐下载时，需要正确配置 `netease_cookie`
 - 使用哔哩哔哩下载时，需要正确配置 `bbdown_path` 和 `bbdown_cookie`
+- 使用QQ音乐下载时，需要正确配置 `qqmusic_credential`
 
 ### 缓存管理
 ```

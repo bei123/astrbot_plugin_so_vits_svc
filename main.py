@@ -23,6 +23,7 @@ from astrbot.core.message.components import Record
 from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
 from .bilibili_api import BilibiliAPI
+from .qqmusic_api import QQMusicAPI
 from .cache_manager import CacheManager
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -177,6 +178,7 @@ class VoiceConverter:
         self.msst_processor = MSSTProcessor(self.msst_url)
         self.netease_api = NeteaseMusicAPI(self.config)
         self.bilibili_api = BilibiliAPI(self.config)
+        self.qqmusic_api = QQMusicAPI(self.config)
         
         # 初始化缓存管理器
         cache_config = self.config.get("cache_config", {})
@@ -627,6 +629,7 @@ class SoVitsSvcPlugin(Star):
             1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
             2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
             3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
+            4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索并转换QQ音乐
         """
         # 解析参数
         message = event.message_str.strip()
@@ -650,6 +653,10 @@ class SoVitsSvcPlugin(Star):
                 # 检查是否指定了来源类型
                 if args[2].lower() == "bilibili":
                     source_type = "bilibili"
+                    if len(args) > 3:
+                        song_name = " ".join(args[3:])
+                elif args[2].lower() == "qq":
+                    source_type = "qqmusic"
                     if len(args) > 3:
                         song_name = " ".join(args[3:])
                 else:
@@ -707,6 +714,46 @@ class SoVitsSvcPlugin(Star):
                     logger.error(f"处理哔哩哔哩视频时出错: {str(e)}")
                     yield event.plain_result(f"处理/下载视频时出错：{str(e)}")
                     return
+            elif source_type == "qqmusic" and song_name:
+                try:
+                    yield event.plain_result(f"正在搜索QQ音乐：{song_name}...")
+                    
+                    # 确保QQ音乐已登录
+                    if not await self.converter.qqmusic_api.ensure_login():
+                        yield event.plain_result("QQ音乐登录失败，请检查配置或重新登录")
+                        return
+                    
+                    song_info = await self.converter.qqmusic_api.get_song_with_highest_quality(song_name)
+                    
+                    if not song_info:
+                        yield event.plain_result(f"未找到QQ音乐歌曲：{song_name}")
+                        return
+                        
+                    if not song_info.get("url"):
+                        yield event.plain_result("无法获取QQ音乐下载链接，可能是版权限制")
+                        return
+                        
+                    yield event.plain_result(
+                        f"找到QQ音乐歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
+                        f"音质：{song_info.get('level', '未知音质')}\n"
+                        f"正在下载..."
+                    )
+                    
+                    downloaded_file = await self.converter.qqmusic_api.download_song(song_info, self.temp_dir)
+                    if not downloaded_file:
+                        yield event.plain_result("下载QQ音乐歌曲失败！")
+                        return
+                        
+                    if os.path.exists(downloaded_file):
+                        os.rename(downloaded_file, input_file)
+                    else:
+                        yield event.plain_result("下载的QQ音乐文件不存在！")
+                        return
+                        
+                except Exception as e:
+                    logger.error(f"处理QQ音乐时出错: {str(e)}")
+                    yield event.plain_result(f"搜索/下载QQ音乐歌曲时出错：{str(e)}")
+                    return
             elif song_name:
                 try:
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
@@ -762,7 +809,8 @@ class SoVitsSvcPlugin(Star):
                         "用法：\n"
                         "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
                         "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
-                        "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频"
+                        "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
+                        "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索QQ音乐"
                     )
                     return
 
@@ -1004,3 +1052,54 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result("缓存已清空")
         except Exception as e:
             yield event.plain_result(f"清空缓存失败：{str(e)}")
+
+    @command("qqmusic_info")
+    async def get_qqmusic_info(self, event: AstrMessageEvent):
+        """获取QQ音乐歌曲信息
+
+        用法：/qqmusic_info [歌曲名]
+        """
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []
+        
+        if not args:
+            yield event.plain_result("请提供歌曲名！\n用法：/qqmusic_info [歌曲名]")
+            return
+            
+        song_name = " ".join(args)
+            
+        try:
+            yield event.plain_result(f"正在搜索QQ音乐歌曲：{song_name}...")
+            
+            # 确保QQ音乐已登录
+            if not await self.converter.qqmusic_api.ensure_login():
+                yield event.plain_result("QQ音乐登录失败，请检查配置或重新登录")
+                return
+            
+            # 搜索歌曲
+            search_results = await self.converter.qqmusic_api.search(song_name, limit=5)
+            
+            if not search_results:
+                yield event.plain_result(f"未找到QQ音乐歌曲：{song_name}")
+                return
+                
+            result = f"找到 {len(search_results)} 首相关歌曲：\n\n"
+            
+            for i, song in enumerate(search_results, 1):
+                song_name = song.get('name', '未知歌曲')
+                singer_name = song.get('singer', [{}])[0].get('name', '未知歌手')
+                album_name = song.get('album', {}).get('name', '未知专辑')
+                duration = song.get('interval', '未知时长')
+                
+                result += f"{i}. {song_name} - {singer_name}\n"
+                result += f"   专辑：{album_name}\n"
+                result += f"   时长：{duration}秒\n\n"
+                
+            result += "使用方法：\n"
+            result += f"/convert_voice [说话人ID] [音调调整] qq {song_name}"
+            
+            yield event.plain_result(result)
+            
+        except Exception as e:
+            logger.error(f"获取QQ音乐歌曲信息出错: {str(e)}")
+            yield event.plain_result(f"获取QQ音乐歌曲信息时出错：{str(e)}")

@@ -1,0 +1,336 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+QQ音乐API模块
+提供搜索和下载QQ音乐的功能
+"""
+
+import os
+import json
+import asyncio
+import httpx
+import anyio
+from typing import Dict, Optional, List
+from astrbot.core import logger
+from .QQapi.qqmusic_api import search, song
+from .QQapi.qqmusic_api.login import get_qrcode, check_qrcode, QRLoginType, QRCodeLoginEvents
+from .QQapi.qqmusic_api.utils.credential import Credential
+
+
+class QQMusicAPI:
+    """QQ音乐API类"""
+
+    def __init__(self, config: Dict = None):
+        """初始化API
+
+        Args:
+            config: 插件配置字典
+        """
+        self.config = config or {}
+        self.credential_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 
+            "QQapi", 
+            "qqmusic_credential.json"
+        )
+        self.credential = None
+        self.credential_lock = asyncio.Lock()
+
+    async def ensure_login(self) -> bool:
+        """确保已登录QQ音乐
+
+        Returns:
+            是否登录成功
+        """
+        async with self.credential_lock:
+            if self.credential:
+                return True
+                
+            # 尝试加载已保存的凭证
+            self.credential = self._load_credential()
+            if self.credential:
+                logger.info("已加载保存的QQ音乐登录凭证")
+                return True
+                
+            # 需要重新登录
+            logger.info("正在获取QQ音乐登录二维码...")
+            try:
+                # 获取QQ登录二维码
+                qr = await get_qrcode(QRLoginType.QQ)
+                
+                # 保存二维码图片
+                qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
+                qr.save(qr_path)
+                logger.info(f"二维码已保存为 {qr_path}，请使用QQ音乐APP扫描")
+                
+                # 等待扫码
+                while True:
+                    event, credential = await check_qrcode(qr)
+                    if event == QRCodeLoginEvents.DONE and credential:
+                        logger.info("QQ音乐登录成功！")
+                        # 保存凭证
+                        self._save_credential(credential)
+                        self.credential = credential
+                        return True
+                    elif event == QRCodeLoginEvents.SCAN:
+                        logger.info("等待扫码...")
+                    elif event == QRCodeLoginEvents.CONF:
+                        logger.info("已扫码，等待确认...")
+                    elif event == QRCodeLoginEvents.TIMEOUT:
+                        logger.error("二维码已过期，请重新登录")
+                        return False
+                    elif event == QRCodeLoginEvents.REFUSE:
+                        logger.error("已拒绝登录")
+                        return False
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"QQ音乐登录出错: {str(e)}")
+                return False
+
+    def _save_credential(self, credential: Credential):
+        """保存登录凭证到文件"""
+        data = {
+            "musicid": credential.musicid,
+            "musickey": credential.musickey
+        }
+        with open(self.credential_file, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def _load_credential(self) -> Optional[Credential]:
+        """从文件加载登录凭证"""
+        if not os.path.exists(self.credential_file):
+            return None
+        try:
+            with open(self.credential_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return Credential(musicid=data["musicid"], musickey=data["musickey"])
+        except Exception as e:
+            logger.error(f"加载QQ音乐凭证出错: {str(e)}")
+            return None
+
+    async def search(self, keyword: str, limit: int = 5) -> List[Dict]:
+        """搜索歌曲
+
+        Args:
+            keyword: 搜索关键词
+            limit: 返回结果数量
+
+        Returns:
+            搜索结果列表
+        """
+        if not await self.ensure_login():
+            logger.error("QQ音乐未登录，无法搜索")
+            return []
+            
+        try:
+            search_result = await search.search_by_type(keyword=keyword, num=limit)
+            return search_result or []
+        except Exception as e:
+            logger.error(f"QQ音乐搜索出错: {str(e)}")
+            return []
+
+    async def get_song_url(self, song_mid: str, file_type=None) -> Optional[str]:
+        """获取歌曲下载链接
+
+        Args:
+            song_mid: 歌曲ID
+            file_type: 音质类型，默认为None，将尝试获取最高音质
+
+        Returns:
+            下载链接，失败返回None
+        """
+        if not await self.ensure_login():
+            logger.error("QQ音乐未登录，无法获取下载链接")
+            return None
+            
+        try:
+            # 如果未指定音质类型，则尝试不同音质
+            if file_type is None:
+                file_types = [
+                    song.SongFileType.MASTER,    # 臻品母带
+                    song.SongFileType.ATMOS_2,   # 臻品全景声
+                    song.SongFileType.ATMOS_51,  # 臻品音质
+                    song.SongFileType.FLAC,      # 无损
+                    song.SongFileType.OGG_640,   # 640kbps
+                    song.SongFileType.OGG_320,   # 320kbps
+                    song.SongFileType.MP3_320,   # 320kbps
+                    song.SongFileType.ACC_192,   # 192kbps
+                    song.SongFileType.MP3_128,   # 128kbps
+                    song.SongFileType.ACC_96,    # 96kbps
+                    song.SongFileType.ACC_48     # 48kbps
+                ]
+                
+                for ft in file_types:
+                    try:
+                        urls = await song.get_song_urls(
+                            mid=[song_mid],
+                            credential=self.credential,
+                            file_type=ft
+                        )
+                        if urls and urls.get(song_mid):
+                            return urls[song_mid]
+                    except:
+                        continue
+                
+                return None
+            else:
+                # 使用指定的音质类型
+                urls = await song.get_song_urls(
+                    mid=[song_mid],
+                    credential=self.credential,
+                    file_type=file_type
+                )
+                return urls.get(song_mid) if urls else None
+                
+        except Exception as e:
+            logger.error(f"获取QQ音乐下载链接出错: {str(e)}")
+            return None
+
+    def get_quality_name(self, file_type) -> str:
+        """获取音质名称
+
+        Args:
+            file_type: 音质类型
+
+        Returns:
+            音质名称
+        """
+        quality_map = {
+            song.SongFileType.MASTER: "臻品母带",
+            song.SongFileType.ATMOS_2: "臻品全景声",
+            song.SongFileType.ATMOS_51: "臻品音质",
+            song.SongFileType.FLAC: "无损",
+            song.SongFileType.OGG_640: "640kbps",
+            song.SongFileType.OGG_320: "320kbps",
+            song.SongFileType.MP3_320: "320kbps",
+            song.SongFileType.ACC_192: "192kbps",
+            song.SongFileType.MP3_128: "128kbps",
+            song.SongFileType.ACC_96: "96kbps",
+            song.SongFileType.ACC_48: "48kbps"
+        }
+        return quality_map.get(file_type, "未知音质")
+
+    def get_file_extension(self, file_type) -> str:
+        """获取文件扩展名
+
+        Args:
+            file_type: 音质类型
+
+        Returns:
+            文件扩展名
+        """
+        extension_map = {
+            song.SongFileType.MASTER: ".flac",
+            song.SongFileType.ATMOS_2: ".flac",
+            song.SongFileType.ATMOS_51: ".flac",
+            song.SongFileType.FLAC: ".flac",
+            song.SongFileType.OGG_640: ".ogg",
+            song.SongFileType.OGG_320: ".ogg",
+            song.SongFileType.MP3_320: ".mp3",
+            song.SongFileType.ACC_192: ".m4a",
+            song.SongFileType.MP3_128: ".mp3",
+            song.SongFileType.ACC_96: ".m4a",
+            song.SongFileType.ACC_48: ".m4a"
+        }
+        return extension_map.get(file_type, ".mp3")
+
+    async def get_song_with_highest_quality(self, keyword: str) -> Optional[Dict]:
+        """获取最高音质的歌曲信息
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            歌曲信息字典，失败返回None
+        """
+        search_results = await self.search(keyword, limit=1)
+        if not search_results:
+            return None
+            
+        song_info = search_results[0]
+        song_mid = song_info['mid']
+        song_name = song_info['name']
+        singer_name = song_info.get('singer', [{}])[0].get('name', '未知歌手')
+        
+        # 尝试获取下载链接
+        url = await self.get_song_url(song_mid)
+        if not url:
+            return None
+            
+        # 获取音质信息
+        file_types = [
+            song.SongFileType.MASTER,
+            song.SongFileType.ATMOS_2,
+            song.SongFileType.ATMOS_51,
+            song.SongFileType.FLAC,
+            song.SongFileType.OGG_640,
+            song.SongFileType.OGG_320,
+            song.SongFileType.MP3_320,
+            song.SongFileType.ACC_192,
+            song.SongFileType.MP3_128,
+            song.SongFileType.ACC_96,
+            song.SongFileType.ACC_48
+        ]
+        
+        used_type = None
+        for file_type in file_types:
+            try:
+                urls = await song.get_song_urls(
+                    mid=[song_mid],
+                    credential=self.credential,
+                    file_type=file_type
+                )
+                if urls and urls.get(song_mid):
+                    used_type = file_type
+                    break
+            except:
+                continue
+                
+        if not used_type:
+            return None
+            
+        # 构建返回信息
+        return {
+            "name": song_name,
+            "ar_name": singer_name,
+            "mid": song_mid,
+            "url": url,
+            "level": self.get_quality_name(used_type),
+            "extension": self.get_file_extension(used_type),
+            "file_type": used_type
+        }
+
+    async def download_song(self, song_info: Dict, save_path: Optional[str] = None) -> Optional[str]:
+        """下载歌曲
+
+        Args:
+            song_info: 歌曲信息字典
+            save_path: 保存路径，默认为None，将使用临时目录
+
+        Returns:
+            下载的文件路径，失败返回None
+        """
+        if not song_info or not song_info.get("url"):
+            return None
+            
+        if not save_path:
+            save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+            os.makedirs(save_path, exist_ok=True)
+            
+        try:
+            song_name = song_info.get("name", "未知歌曲")
+            extension = song_info.get("extension", ".mp3")
+            file_path = os.path.join(save_path, f"{song_name}{extension}")
+            
+            async with httpx.AsyncClient() as client:
+                async with client.stream("GET", song_info["url"]) as response:
+                    response.raise_for_status()
+                    async with await anyio.open_file(file_path, "wb") as f:
+                        async for chunk in response.aiter_bytes(1024 * 5):
+                            if chunk:
+                                await f.write(chunk)
+                                
+            return file_path
+        except Exception as e:
+            logger.error(f"下载QQ音乐歌曲出错: {str(e)}")
+            return None 

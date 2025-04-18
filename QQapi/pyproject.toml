@@ -1,0 +1,122 @@
+[project]
+name = "qqmusic-api-python"
+description = "QQ音乐API封装库"
+authors = [
+  { name = "Luren", email = "68656403+luren-dc@users.noreply.github.com" },
+]
+dependencies = [
+  "cryptography>=44.0.1,<44.0.2",
+  "typing-extensions>=4.12.2",
+  "httpx[http2]>=0.27.0",
+  "aiocache>=0.12.3",
+  "orjson>=3.10.15",
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+maintainers = [
+  { name = "Luren", email = "68656403+luren-dc@users.noreply.github.com" },
+]
+keywords = ["music", "api", "qqmusic", "tencentmusic"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Natural Language :: Chinese (Simplified)",
+  "License :: OSI Approved :: MIT License",
+  "Framework :: Pytest",
+  "Framework :: aiohttp",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://luren-dc.github.io/QQMusicApi/"
+repository = "https://github.com/luren-dc/QQMusicApi"
+documentation = "https://luren-dc.github.io/QQMusicApi/"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true
+
+[tool.hatch.version]
+path = "qqmusic_api/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["qqmusic_api"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/qqmusic_api", "/tests", "LISENCE", "README.md"]
+
+[dependency-groups]
+testing = [
+  "pytest<9.0.0,>=8.2.0",
+  "pytest-asyncio<1.0.0,>=0.23.6",
+  "pytest-sugar<2.0.0,>=1.0.0",
+]
+docs = [
+  "mkdocs-material>=9.5.29",
+  "mkdocstrings-python>=1.10.5",
+  "mkdocstrings>=0.25.1",
+  "mkdocs>=1.6.0",
+  "markdown-callouts>=0.4.0",
+  "griffe-inherited-docstrings>=1.0.0",
+  "docstring-inheritance>=2.2.1",
+  "griffe-modernized-annotations>=1.0.8",
+]
+web = [
+    "fastapi>=0.115.8",
+    "uvicorn>=0.34.0",
+]
+
+[tool.commitizen]
+name = "cz_gitmoji"
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
+include = ["qqmusic_api"]
+exclude = ["tests", "examples"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+extend-select = [
+  "Q",
+  "RUF",
+  "C90",
+  "UP",
+  "I",
+  "D",
+  "ASYNC",
+  "C4",
+  "FURB",
+  "R",
+  "PERF",
+]
+ignore = ["D105", "D107", "D205", "D415"]
+pydocstyle = { convention = "google" }
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+"examples/*" = ["D", "T"]
+"qqmusic_api/__init__.py" = ["F405", "D"]
+"qqmusic_api/**/__init__.py" = ["F405", "D"]
+
+[tool.pytest.ini_options]
+addopts = "-rxXs"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
