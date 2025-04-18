@@ -156,9 +156,8 @@ class QQMusicAPI:
                 
                 # 保存新二维码
                 try:
-                    # 直接保存为文件，不创建目录
-                    with open(qr_path, "wb") as f:
-                        f.write(qr.getvalue())
+                    # 使用save方法保存二维码
+                    qr.save(qr_path)
                     logger.info(f"二维码已保存到: {qr_path}")
                 except Exception as e:
                     logger.error(f"保存二维码失败: {str(e)}")
