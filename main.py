@@ -13,6 +13,8 @@ import uuid
 import requests
 import json
 import aiohttp
+import hashlib
+import shutil
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
 from astrbot.api.event.filter import command, permission_type
@@ -146,6 +148,7 @@ class VoiceConverter:
         self.config = config or {}
         self.base_setting = self.config.get("base_setting", {})
         self.voice_config = self.config.get("voice_config", {})
+        self.cache_config = self.config.get("cache_config", {})
         self.executor = ThreadPoolExecutor(max_workers=1)  # 限制同时只能处理一个转换任务
         self.current_task = None  # 当前正在执行的任务
         self.task_lock = asyncio.Lock()  # 任务锁
@@ -171,6 +174,14 @@ class VoiceConverter:
         self.default_enhancer_adaptive_key = self.voice_config.get("default_enhancer_adaptive_key", 0)
         self.default_cr_threshold = self.voice_config.get("default_cr_threshold", 0.05)
 
+        # 缓存设置
+        self.cache_enabled = self.cache_config.get("enabled", True)
+        self.cache_expire_days = self.cache_config.get("expire_days", 7)
+        self.cache_dir = self.cache_config.get("cache_dir", "data/cache/so-vits-svc")
+        if self.cache_enabled:
+            os.makedirs(self.cache_dir, exist_ok=True)
+            self._clean_expired_cache()
+
         # 初始化组件
         self.session = requests.Session()
         self.msst_processor = MSSTProcessor(self.msst_url)
@@ -190,207 +201,216 @@ class VoiceConverter:
             logger.error(f"健康检查失败: {str(e)}")
             return None
 
+    def _generate_cache_key(self, input_file: str, speaker_id: str, pitch_adjust: int, **kwargs) -> str:
+        """生成缓存键
+
+        Args:
+            input_file: 输入文件路径
+            speaker_id: 说话人ID
+            pitch_adjust: 音高调整值
+            **kwargs: 其他参数
+
+        Returns:
+            str: 缓存键
+        """
+        # 读取文件内容的MD5
+        with open(input_file, "rb") as f:
+            file_hash = hashlib.md5(f.read()).hexdigest()
+
+        # 组合参数
+        params = {
+            "file_hash": file_hash,
+            "speaker_id": speaker_id,
+            "pitch_adjust": pitch_adjust,
+            **kwargs
+        }
+
+        # 生成参数字符串的MD5
+        params_str = json.dumps(params, sort_keys=True)
+        params_hash = hashlib.md5(params_str.encode()).hexdigest()
+
+        return f"{file_hash}_{params_hash}"
+
+    def _get_cache_path(self, cache_key: str) -> str:
+        """获取缓存文件路径
+
+        Args:
+            cache_key: 缓存键
+
+        Returns:
+            str: 缓存文件路径
+        """
+        return os.path.join(self.cache_dir, f"{cache_key}.wav")
+
+    def _get_from_cache(self, cache_key: str) -> Optional[str]:
+        """从缓存中获取文件
+
+        Args:
+            cache_key: 缓存键
+
+        Returns:
+            Optional[str]: 缓存文件路径，不存在返回None
+        """
+        if not self.cache_enabled:
+            return None
+
+        cache_path = self._get_cache_path(cache_key)
+        if os.path.exists(cache_path):
+            # 检查文件是否过期
+            mtime = os.path.getmtime(cache_path)
+            if time.time() - mtime < self.cache_expire_days * 24 * 3600:
+                return cache_path
+            else:
+                # 删除过期文件
+                try:
+                    os.remove(cache_path)
+                except Exception as e:
+                    logger.error(f"删除过期缓存文件失败: {e}")
+        return None
+
+    def _save_to_cache(self, cache_key: str, file_path: str) -> None:
+        """保存文件到缓存
+
+        Args:
+            cache_key: 缓存键
+            file_path: 文件路径
+        """
+        if not self.cache_enabled:
+            return
+
+        try:
+            cache_path = self._get_cache_path(cache_key)
+            shutil.copy2(file_path, cache_path)
+            logger.info(f"已保存到缓存: {cache_path}")
+        except Exception as e:
+            logger.error(f"保存到缓存失败: {e}")
+
+    def _clean_expired_cache(self) -> None:
+        """清理过期的缓存文件"""
+        if not self.cache_enabled:
+            return
+
+        try:
+            current_time = time.time()
+            expire_time = current_time - self.cache_expire_days * 24 * 3600
+
+            for filename in os.listdir(self.cache_dir):
+                file_path = os.path.join(self.cache_dir, filename)
+                if os.path.getmtime(file_path) < expire_time:
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"已删除过期缓存文件: {file_path}")
+                    except Exception as e:
+                        logger.error(f"删除过期缓存文件失败: {e}")
+        except Exception as e:
+            logger.error(f"清理过期缓存失败: {e}")
+
     async def convert_voice_async(
         self,
         input_wav: str,
         output_wav: str,
-        speaker_id: Optional[str] = None,
-        pitch_adjust: Optional[int] = None,
-        k_step: Optional[int] = None,
-        shallow_diffusion: Optional[bool] = None,
-        only_diffusion: Optional[bool] = None,
-        cluster_infer_ratio: Optional[float] = None,
-        auto_predict_f0: Optional[bool] = None,
-        noice_scale: Optional[float] = None,
-        f0_filter: Optional[bool] = None,
-        f0_predictor: Optional[str] = None,
-        enhancer_adaptive_key: Optional[int] = None,
-        cr_threshold: Optional[float] = None,
+        speaker_id: str,
+        pitch_adjust: int = 0,
+        f0_method: str = "crepe",
+        index_rate: float = 0.5,
+        filter_radius: int = 3,
+        resample_rate: int = 48000,
+        **kwargs
     ) -> bool:
-        """异步转换语音"""
-        async with self.task_lock:  # 使用锁确保同一时间只有一个任务在执行
-            if self.current_task is not None:
-                raise RuntimeError("当前已有任务正在处理，请等待完成后再试")
-
-            try:
-                self.current_task = asyncio.current_task()
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(
-                    self.executor,
-                    self.convert_voice,
-                    input_wav,
-                    output_wav,
-                    speaker_id,
-                    pitch_adjust,
-                    k_step,
-                    shallow_diffusion,
-                    only_diffusion,
-                    cluster_infer_ratio,
-                    auto_predict_f0,
-                    noice_scale,
-                    f0_filter,
-                    f0_predictor,
-                    enhancer_adaptive_key,
-                    cr_threshold,
-                )
-            finally:
-                self.current_task = None
-
-    def convert_voice(
-        self,
-        input_wav: str,
-        output_wav: str,
-        speaker_id: Optional[str] = None,
-        pitch_adjust: Optional[int] = None,
-        k_step: Optional[int] = None,
-        shallow_diffusion: Optional[bool] = None,
-        only_diffusion: Optional[bool] = None,
-        cluster_infer_ratio: Optional[float] = None,
-        auto_predict_f0: Optional[bool] = None,
-        noice_scale: Optional[float] = None,
-        f0_filter: Optional[bool] = None,
-        f0_predictor: Optional[str] = None,
-        enhancer_adaptive_key: Optional[int] = None,
-        cr_threshold: Optional[float] = None,
-    ) -> bool:
-        """转换语音
+        """异步转换语音
 
         Args:
             input_wav: 输入音频文件路径
             output_wav: 输出音频文件路径
-            speaker_id: 说话人ID，默认使用配置值
-            pitch_adjust: 音调调整，默认使用配置值
-            k_step: 扩散步数，默认使用配置值
-            shallow_diffusion: 使用浅扩散，默认使用配置值
-            only_diffusion: 使用纯扩散，默认使用配置值
-            cluster_infer_ratio: 聚类推理比例，默认使用配置值
-            auto_predict_f0: 自动预测音高，默认使用配置值
-            noice_scale: 噪声比例，默认使用配置值
-            f0_filter: 过滤F0，默认使用配置值
-            f0_predictor: F0预测器，默认使用配置值
-            enhancer_adaptive_key: 增强器自适应键，默认使用配置值
-            cr_threshold: 交叉参考阈值，默认使用配置值
+            speaker_id: 说话人ID
+            pitch_adjust: 音高调整值
+            f0_method: 音高提取方法
+            index_rate: 索引率
+            filter_radius: 滤波半径
+            resample_rate: 重采样率
+            **kwargs: 其他参数
 
         Returns:
-            转换是否成功
+            bool: 是否转换成功
         """
-        # 使用默认值
-        if speaker_id is None:
-            speaker_id = self.default_speaker
-        if pitch_adjust is None:
-            pitch_adjust = self.default_pitch
-        if k_step is None:
-            k_step = self.default_k_step
-        if shallow_diffusion is None:
-            shallow_diffusion = self.default_shallow_diffusion
-        if only_diffusion is None:
-            only_diffusion = self.default_only_diffusion
-        if cluster_infer_ratio is None:
-            cluster_infer_ratio = self.default_cluster_infer_ratio
-        if auto_predict_f0 is None:
-            auto_predict_f0 = self.default_auto_predict_f0
-        if noice_scale is None:
-            noice_scale = self.default_noice_scale
-        if f0_filter is None:
-            f0_filter = self.default_f0_filter
-        if f0_predictor is None:
-            f0_predictor = self.default_f0_predictor
-        if enhancer_adaptive_key is None:
-            enhancer_adaptive_key = self.default_enhancer_adaptive_key
-        if cr_threshold is None:
-            cr_threshold = self.default_cr_threshold
-
-        # 检查服务健康状态
-        health = self.check_health()
-        if not health:
-            raise RuntimeError("服务未就绪")
-
-        if not health.get("model_loaded"):
-            raise RuntimeError("模型未加载")
-
-        if health.get("queue_size", 0) >= self.max_queue_size:
-            raise RuntimeError("服务器任务队列已满，请稍后重试")
-
-        # 检查输入文件
-        if not os.path.exists(input_wav):
-            raise FileNotFoundError(f"输入文件不存在: {input_wav}")
-
-        # 先进行 MSST 处理
-        processed_file = self.msst_processor.process_audio(input_wav, self.msst_preset)
-        if not processed_file:
-            raise RuntimeError("MSST 处理失败")
-
         try:
-            # 读取处理后的音频文件
-            with open(processed_file, "rb") as f:
-                audio_data = f.read()
-
-            # 准备请求数据
-            files = {"audio": ("input.wav", audio_data, "audio/wav")}
-            data = {
-                "tran": str(pitch_adjust),
-                "spk": str(speaker_id),
-                "wav_format": "wav",
-                "k_step": str(k_step),
-                "shallow_diffusion": str(shallow_diffusion).lower(),
-                "only_diffusion": str(only_diffusion).lower(),
-                "cluster_infer_ratio": str(cluster_infer_ratio),
-                "auto_predict_f0": str(auto_predict_f0).lower(),
-                "noice_scale": str(noice_scale),
-                "f0_filter": str(f0_filter).lower(),
-                "f0_predictor": f0_predictor,
-                "enhancer_adaptive_key": str(enhancer_adaptive_key),
-                "cr_threshold": str(cr_threshold),
-            }
-
-            # 发送请求
-            logger.info(f"开始转换音频: {processed_file}")
-            logger.info(f"使用说话人ID: {speaker_id}")
-            logger.info(f"音调调整: {pitch_adjust}")
-            logger.info(f"扩散步数: {k_step}")
-            logger.info(f"使用浅扩散: {shallow_diffusion}")
-            logger.info(f"使用纯扩散: {only_diffusion}")
-            logger.info(f"聚类推理比例: {cluster_infer_ratio}")
-            logger.info(f"自动预测音高: {auto_predict_f0}")
-            logger.info(f"噪声比例: {noice_scale}")
-            logger.info(f"过滤F0: {f0_filter}")
-            logger.info(f"F0预测器: {f0_predictor}")
-            logger.info(f"增强器自适应键: {enhancer_adaptive_key}")
-            logger.info(f"交叉参考阈值: {cr_threshold}")
-
-            start_time = time.time()
-            response = self.session.post(
-                f"{self.api_url}/wav2wav", data=data, files=files, timeout=self.timeout
-            )
-
-            # 处理响应
-            if response.status_code == 200:
-                with open(output_wav, "wb") as f:
-                    f.write(response.content)
-
-                process_time = time.time() - start_time
-                logger.info(f"转换成功！输出文件已保存为: {output_wav}")
-                logger.info(f"处理耗时: {process_time:.2f}秒")
-                return True
-            else:
-                try:
-                    error_msg = response.json().get("error", "未知错误")
-                except (json.JSONDecodeError, AttributeError):
-                    error_msg = f"HTTP {response.status_code}: {response.text}"
-                logger.error(f"转换失败！状态码: {response.status_code}")
-                logger.error(f"错误信息: {error_msg}")
+            # 检查服务是否健康
+            if not self.check_health():
+                logger.error("服务不健康，无法进行转换")
                 return False
 
-        except requests.Timeout:
-            logger.error("请求超时")
-            return False
+            # 检查输入文件是否存在
+            if not os.path.exists(input_wav):
+                logger.error(f"输入文件不存在: {input_wav}")
+                return False
+
+            # 生成缓存键
+            cache_key = self._generate_cache_key(
+                input_wav,
+                speaker_id,
+                pitch_adjust,
+                f0_method=f0_method,
+                index_rate=index_rate,
+                filter_radius=filter_radius,
+                resample_rate=resample_rate,
+                **kwargs
+            )
+
+            # 检查缓存
+            if self.cache_enabled:
+                cached_file = self._get_from_cache(cache_key)
+                if cached_file:
+                    logger.info(f"使用缓存文件: {cached_file}")
+                    shutil.copy2(cached_file, output_wav)
+                    return True
+
+            # 准备请求参数
+            params = {
+                "speaker_id": speaker_id,
+                "pitch_adjust": pitch_adjust,
+                "f0_method": f0_method,
+                "index_rate": index_rate,
+                "filter_radius": filter_radius,
+                "resample_rate": resample_rate,
+                **kwargs
+            }
+
+            # 记录转换参数
+            logger.info(f"开始异步转换语音，参数: {params}")
+
+            # 发送异步请求
+            async with aiohttp.ClientSession() as session:
+                with open(input_wav, "rb") as f:
+                    data = aiohttp.FormData()
+                    data.add_field("audio", f)
+                    for key, value in params.items():
+                        data.add_field(key, str(value))
+
+                    async with session.post(
+                        f"{self.api_url}/convert",
+                        data=data,
+                        timeout=self.timeout
+                    ) as response:
+                        if response.status != 200:
+                            logger.error(f"转换失败，状态码: {response.status}")
+                            return False
+
+                        # 保存结果
+                        content = await response.read()
+                        with open(output_wav, "wb") as f:
+                            f.write(content)
+
+            # 缓存结果
+            if self.cache_enabled:
+                self._save_to_cache(cache_key, output_wav)
+
+            logger.info(f"异步转换成功，输出文件: {output_wav}")
+            return True
+
         except Exception as e:
-            logger.error(f"发生错误: {str(e)}")
+            logger.error(f"异步转换失败: {e}")
+            logger.error(f"转换失败: {e}")
             return False
-        finally:
-            # 清理处理后的文件
-            if processed_file and os.path.exists(processed_file):
-                os.remove(processed_file)
 
 
 @register(
@@ -413,6 +433,12 @@ class SoVitsSvcPlugin(Star):
         self.config = config
         self._init_config()
         self.conversion_tasks = {}  # 存储正在进行的转换任务
+        
+        # 从配置中读取缓存设置
+        cache_config = self.config.get("so_vits_svc_api", {}).get("cache_config", {})
+        self.cache_enabled = cache_config.get("cache_enabled", True)  # 默认启用缓存
+        self.cache_expire_days = cache_config.get("cache_expire_days", 7)  # 默认缓存7天
+        self.cache_dir = cache_config.get("cache_dir", "data/cache/so-vits-svc")  # 默认缓存目录
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -463,6 +489,18 @@ class SoVitsSvcPlugin(Star):
                                 "hint": "用于访问网易云音乐API的Cookie",
                                 "default": "",
                             },
+                            "bbdown_path": {
+                                "description": "BBDown可执行文件路径",
+                                "type": "string",
+                                "hint": "BBDown可执行文件的路径，如果已添加到PATH中，可以直接使用BBDown",
+                                "default": "BBDown",
+                            },
+                            "bbdown_cookie": {
+                                "description": "哔哩哔哩Cookie",
+                                "type": "string",
+                                "hint": "用于访问哔哩哔哩API的Cookie，格式为SESSDATA=xxx;bili_jct=xxx;DedeUserID=xxx",
+                                "default": "",
+                            },
                         },
                     },
                     "voice_config": {
@@ -488,6 +526,90 @@ class SoVitsSvcPlugin(Star):
                                 "hint": "默认的音调调整值，范围-12到12",
                                 "default": 0,
                             },
+                            "default_k_step": {
+                                "description": "默认扩散步数",
+                                "type": "integer",
+                                "hint": "默认的扩散步数",
+                                "default": 100,
+                            },
+                            "default_shallow_diffusion": {
+                                "description": "默认使用浅扩散",
+                                "type": "boolean",
+                                "hint": "是否默认使用浅扩散",
+                                "default": True,
+                            },
+                            "default_only_diffusion": {
+                                "description": "默认使用纯扩散",
+                                "type": "boolean",
+                                "hint": "是否默认使用纯扩散",
+                                "default": False,
+                            },
+                            "default_cluster_infer_ratio": {
+                                "description": "默认聚类推理比例",
+                                "type": "float",
+                                "hint": "默认的聚类推理比例",
+                                "default": 0,
+                            },
+                            "default_auto_predict_f0": {
+                                "description": "默认自动预测音高",
+                                "type": "boolean",
+                                "hint": "是否默认自动预测音高",
+                                "default": False,
+                            },
+                            "default_noice_scale": {
+                                "description": "默认噪声比例",
+                                "type": "float",
+                                "hint": "默认的噪声比例",
+                                "default": 0.4,
+                            },
+                            "default_f0_filter": {
+                                "description": "默认过滤F0",
+                                "type": "boolean",
+                                "hint": "是否默认过滤F0",
+                                "default": False,
+                            },
+                            "default_f0_predictor": {
+                                "description": "默认F0预测器",
+                                "type": "string",
+                                "hint": "默认使用的F0预测器",
+                                "default": "fcpe",
+                            },
+                            "default_enhancer_adaptive_key": {
+                                "description": "默认增强器自适应键",
+                                "type": "integer",
+                                "hint": "默认的增强器自适应键值",
+                                "default": 0,
+                            },
+                            "default_cr_threshold": {
+                                "description": "默认交叉参考阈值",
+                                "type": "float",
+                                "hint": "默认的交叉参考阈值",
+                                "default": 0.05,
+                            },
+                        },
+                    },
+                    "cache_config": {
+                        "description": "缓存配置",
+                        "type": "object",
+                        "items": {
+                            "cache_enabled": {
+                                "description": "是否启用缓存",
+                                "type": "boolean",
+                                "hint": "是否启用转换结果缓存",
+                                "default": True,
+                            },
+                            "cache_expire_days": {
+                                "description": "缓存过期天数",
+                                "type": "integer",
+                                "hint": "缓存文件保留的天数，超过此天数将自动删除",
+                                "default": 7,
+                            },
+                            "cache_dir": {
+                                "description": "缓存目录",
+                                "type": "string",
+                                "hint": "缓存文件存储的目录",
+                                "default": "data/cache/so-vits-svc",
+                            },
                         },
                     },
                 },
@@ -498,7 +620,83 @@ class SoVitsSvcPlugin(Star):
         """初始化配置"""
         self.converter = VoiceConverter(self.config)
         self.temp_dir = "data/temp/so-vits-svc"
+        
+        # 从配置中读取缓存目录
+        cache_config = self.config.get("so_vits_svc_api", {}).get("cache_config", {})
+        self.cache_dir = cache_config.get("cache_dir", "data/cache/so-vits-svc")
+        
         os.makedirs(self.temp_dir, exist_ok=True)
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # 清理过期缓存
+        self._clean_expired_cache()
+
+    def _generate_cache_key(self, input_wav: str, speaker_id: int, pitch_adjust: float = 0.0) -> str:
+        """生成缓存键
+
+        Args:
+            input_wav: 输入音频文件路径
+            speaker_id: 说话人ID
+            pitch_adjust: 音高调整值
+
+        Returns:
+            str: 缓存键
+        """
+        # 使用文件内容的哈希值作为缓存键的一部分
+        with open(input_wav, 'rb') as f:
+            file_hash = hashlib.md5(f.read()).hexdigest()
+        
+        # 组合参数生成缓存键
+        cache_key = f"{file_hash}_{speaker_id}_{pitch_adjust}"
+        return cache_key
+
+    def _get_cached_file(self, cache_key: str) -> Optional[str]:
+        """获取缓存的文件
+
+        Args:
+            cache_key: 缓存键
+
+        Returns:
+            Optional[str]: 缓存文件路径，如果不存在则返回None
+        """
+        if not self.cache_enabled:
+            return None
+            
+        cache_file = os.path.join(self.cache_dir, f"{cache_key}.wav")
+        if os.path.exists(cache_file):
+            # 检查文件是否过期
+            file_time = os.path.getmtime(cache_file)
+            if time.time() - file_time < self.cache_expire_days * 24 * 3600:
+                return cache_file
+            else:
+                # 删除过期文件
+                os.remove(cache_file)
+        return None
+
+    def _save_to_cache(self, cache_key: str, file_path: str) -> None:
+        """保存文件到缓存
+
+        Args:
+            cache_key: 缓存键
+            file_path: 要缓存的文件路径
+        """
+        if not self.cache_enabled:
+            return
+            
+        cache_file = os.path.join(self.cache_dir, f"{cache_key}.wav")
+        shutil.copy2(file_path, cache_file)
+
+    def _clean_expired_cache(self) -> None:
+        """清理过期的缓存文件"""
+        if not os.path.exists(self.cache_dir):
+            return
+            
+        current_time = time.time()
+        for filename in os.listdir(self.cache_dir):
+            file_path = os.path.join(self.cache_dir, filename)
+            if os.path.isfile(file_path):
+                if current_time - os.path.getmtime(file_path) > self.cache_expire_days * 86400:
+                    os.remove(file_path)
 
     @command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
@@ -530,7 +728,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result(status)
 
     @filter.command("唱", alias={"牢剑唱", "转换"})
-    async def convert_voice(self, event: AstrMessageEvent):
+    async def handle_convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
         用法：
@@ -568,9 +766,6 @@ class SoVitsSvcPlugin(Star):
         # 生成临时文件路径
         input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
         output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
-
-        # 生成任务ID
-        task_id = str(uuid.uuid4())
 
         try:
             # 根据来源类型处理音频
@@ -610,8 +805,7 @@ class SoVitsSvcPlugin(Star):
                         return
 
                     # 将下载的音频文件复制到输入文件路径
-                    import shutil
-                    shutil.copy(downloaded_file, input_file)
+                    shutil.copy2(downloaded_file, input_file)
 
                 except Exception as e:
                     logger.error(f"处理哔哩哔哩视频时出错: {str(e)}")
@@ -620,20 +814,14 @@ class SoVitsSvcPlugin(Star):
             elif song_name:
                 try:
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
-                    song_info = (
-                        self.converter.netease_api.get_song_with_highest_quality(
-                            song_name
-                        )
-                    )
+                    song_info = self.converter.netease_api.get_song_with_highest_quality(song_name)
 
                     if not song_info:
                         yield event.plain_result(f"未找到歌曲：{song_name}")
                         return
 
                     if not song_info.get("url"):
-                        yield event.plain_result(
-                            "无法获取歌曲下载链接，可能是版权限制。"
-                        )
+                        yield event.plain_result("无法获取歌曲下载链接，可能是版权限制。")
                         return
 
                     yield event.plain_result(
@@ -643,9 +831,7 @@ class SoVitsSvcPlugin(Star):
                         f"正在下载..."
                     )
 
-                    downloaded_file = self.converter.netease_api.download_song(
-                        song_info, self.temp_dir
-                    )
+                    downloaded_file = self.converter.netease_api.download_song(song_info, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载歌曲失败！")
                         return
@@ -663,10 +849,7 @@ class SoVitsSvcPlugin(Star):
 
             # 否则检查是否有上传的音频文件
             else:
-                if (
-                    not hasattr(event.message_obj, "files")
-                    or not event.message_obj.files
-                ):
+                if not hasattr(event.message_obj, "files") or not event.message_obj.files:
                     yield event.plain_result(
                         "请上传要转换的音频文件或指定歌曲名！\n"
                         "用法：\n"
@@ -695,29 +878,22 @@ class SoVitsSvcPlugin(Star):
                     yield event.plain_result("无法处理此类型的文件！")
                     return
 
+            # 使用默认参数
+            if speaker_id is None:
+                speaker_id = self.converter.default_speaker
+            if pitch_adjust is None:
+                pitch_adjust = self.converter.default_pitch
+
             # 转换音频
             yield event.plain_result("正在转换音频，请稍候...")
 
             # 创建异步任务
-            task = asyncio.create_task(
-                self.converter.convert_voice_async(
-                    input_wav=input_file,
-                    output_wav=output_file,
-                    speaker_id=speaker_id,
-                    pitch_adjust=pitch_adjust,
-                )
+            success = await self.converter.convert_voice_async(
+                input_wav=input_file,
+                output_wav=output_file,
+                speaker_id=speaker_id,
+                pitch_adjust=pitch_adjust
             )
-
-            # 存储任务
-            self.conversion_tasks[task_id] = {
-                "task": task,
-                "input_file": input_file,
-                "output_file": output_file,
-                "event": event
-            }
-
-            # 等待任务完成
-            success = await task
 
             if success:
                 yield event.plain_result("转换成功！正在发送文件...")
@@ -729,9 +905,6 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"转换过程中发生错误：{str(e)}")
         finally:
-            # 清理任务
-            if task_id in self.conversion_tasks:
-                del self.conversion_tasks[task_id]
             # 清理临时文件
             try:
                 if os.path.exists(input_file):
@@ -740,36 +913,6 @@ class SoVitsSvcPlugin(Star):
                     os.remove(output_file)
             except (OSError, IOError) as e:
                 logger.error(f"清理临时文件失败: {str(e)}")
-
-    @permission_type(PermissionType.ADMIN)
-    @command("cancel_convert")
-    async def cancel_convert(self, event: AstrMessageEvent):
-        """取消正在进行的转换任务"""
-        if not self.conversion_tasks:
-            yield event.plain_result("当前没有正在进行的转换任务")
-            return
-
-        for task_id, task_info in list(self.conversion_tasks.items()):
-            task = task_info["task"]
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                # 清理临时文件
-                try:
-                    if os.path.exists(task_info["input_file"]):
-                        os.remove(task_info["input_file"])
-                    if os.path.exists(task_info["output_file"]):
-                        os.remove(task_info["output_file"])
-                except (OSError, IOError) as e:
-                    logger.error(f"清理临时文件失败: {str(e)}")
-                del self.conversion_tasks[task_id]
-                yield event.plain_result("已取消转换任务")
-                return
-
-        yield event.plain_result("没有找到可取消的转换任务")
 
     @permission_type(PermissionType.ADMIN)
     @command("svc_speakers", alias=["说话人列表"])
@@ -904,3 +1047,181 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}")
             yield event.plain_result(f"获取视频信息时出错：{str(e)}")
+
+    @permission_type(PermissionType.ADMIN)
+    @command("svc_cache_clear")
+    async def clear_cache(self, event: AstrMessageEvent):
+        """清理缓存"""
+        try:
+            if not os.path.exists(self.cache_dir):
+                yield event.plain_result("缓存目录不存在，无需清理。")
+                return
+                
+            count = 0
+            for filename in os.listdir(self.cache_dir):
+                if filename.endswith(".wav"):
+                    file_path = os.path.join(self.cache_dir, filename)
+                    try:
+                        os.remove(file_path)
+                        count += 1
+                    except Exception as e:
+                        logger.error(f"删除缓存文件失败: {str(e)}")
+            
+            yield event.plain_result(f"已清理 {count} 个缓存文件。")
+        except Exception as e:
+            logger.error(f"清理缓存失败: {str(e)}")
+            yield event.plain_result(f"清理缓存失败: {str(e)}")
+    
+    @permission_type(PermissionType.ADMIN)
+    @command("svc_cache_status")
+    async def cache_status(self, event: AstrMessageEvent):
+        """查看缓存状态"""
+        try:
+            if not os.path.exists(self.cache_dir):
+                yield event.plain_result("缓存目录不存在。")
+                return
+                
+            total_size = 0
+            file_count = 0
+            for filename in os.listdir(self.cache_dir):
+                if filename.endswith(".wav"):
+                    file_path = os.path.join(self.cache_dir, filename)
+                    file_size = os.path.getsize(file_path)
+                    total_size += file_size
+                    file_count += 1
+            
+            # 格式化文件大小
+            if total_size < 1024:
+                size_str = f"{total_size} B"
+            elif total_size < 1024 * 1024:
+                size_str = f"{total_size / 1024:.2f} KB"
+            elif total_size < 1024 * 1024 * 1024:
+                size_str = f"{total_size / (1024 * 1024):.2f} MB"
+            else:
+                size_str = f"{total_size / (1024 * 1024 * 1024):.2f} GB"
+            
+            status = f"缓存状态:\n"
+            status += f"缓存文件数量: {file_count}\n"
+            status += f"缓存总大小: {size_str}\n"
+            status += f"缓存过期天数: {self.cache_expire_days} 天\n"
+            status += f"缓存状态: {'启用' if self.cache_enabled else '禁用'}"
+            
+            yield event.plain_result(status)
+        except Exception as e:
+            logger.error(f"获取缓存状态失败: {str(e)}")
+            yield event.plain_result(f"获取缓存状态失败: {str(e)}")
+    
+    @permission_type(PermissionType.ADMIN)
+    @command("svc_cache_toggle")
+    async def toggle_cache(self, event: AstrMessageEvent):
+        """切换缓存状态"""
+        try:
+            self.cache_enabled = not self.cache_enabled
+            
+            # 更新配置
+            if "so_vits_svc_api" not in self.config:
+                self.config["so_vits_svc_api"] = {}
+            if "cache_config" not in self.config["so_vits_svc_api"]:
+                self.config["so_vits_svc_api"]["cache_config"] = {}
+            self.config["so_vits_svc_api"]["cache_config"]["cache_enabled"] = self.cache_enabled
+            
+            # 保存配置
+            self.config.save_config()
+            
+            status = "启用" if self.cache_enabled else "禁用"
+            yield event.plain_result(f"缓存已{status}。")
+        except Exception as e:
+            logger.error(f"切换缓存状态失败: {str(e)}")
+            yield event.plain_result(f"切换缓存状态失败: {str(e)}")
+
+    def _init_commands(self):
+        """初始化命令"""
+        self.commands.extend([
+            Command(
+                name="cache_status",
+                description="查看缓存状态",
+                usage="cache_status",
+                handler=self._handle_cache_status
+            ),
+            Command(
+                name="clear_cache",
+                description="清理缓存",
+                usage="clear_cache",
+                handler=self._handle_clear_cache
+            ),
+            Command(
+                name="toggle_cache",
+                description="开启/关闭缓存",
+                usage="toggle_cache [on/off]",
+                handler=self._handle_toggle_cache
+            )
+        ])
+
+    async def _handle_cache_status(self, event: Event, args: List[str]) -> None:
+        """处理缓存状态命令"""
+        if not self.converter:
+            yield event.plain_result("插件未初始化")
+            return
+
+        cache_dir = self.converter.cache_dir
+        if not os.path.exists(cache_dir):
+            yield event.plain_result("缓存目录不存在")
+            return
+
+        total_size = 0
+        file_count = 0
+        for root, _, files in os.walk(cache_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                total_size += os.path.getsize(file_path)
+                file_count += 1
+
+        status = (
+            f"缓存状态:\n"
+            f"启用状态: {'开启' if self.converter.cache_enabled else '关闭'}\n"
+            f"缓存目录: {cache_dir}\n"
+            f"文件数量: {file_count}\n"
+            f"总大小: {total_size / 1024 / 1024:.2f} MB\n"
+            f"过期时间: {self.converter.cache_expire_days} 天"
+        )
+        yield event.plain_result(status)
+
+    async def _handle_clear_cache(self, event: Event, args: List[str]) -> None:
+        """处理清理缓存命令"""
+        if not self.converter:
+            yield event.plain_result("插件未初始化")
+            return
+
+        cache_dir = self.converter.cache_dir
+        if not os.path.exists(cache_dir):
+            yield event.plain_result("缓存目录不存在")
+            return
+
+        try:
+            shutil.rmtree(cache_dir)
+            os.makedirs(cache_dir, exist_ok=True)
+            yield event.plain_result("缓存已清理")
+        except Exception as e:
+            yield event.plain_result(f"清理缓存失败: {str(e)}")
+
+    async def _handle_toggle_cache(self, event: Event, args: List[str]) -> None:
+        """处理开启/关闭缓存命令"""
+        if not self.converter:
+            yield event.plain_result("插件未初始化")
+            return
+
+        if not args:
+            # 切换状态
+            self.converter.cache_enabled = not self.converter.cache_enabled
+            yield event.plain_result(f"缓存已{'开启' if self.converter.cache_enabled else '关闭'}")
+            return
+
+        state = args[0].lower()
+        if state in ["on", "true", "1"]:
+            self.converter.cache_enabled = True
+            yield event.plain_result("缓存已开启")
+        elif state in ["off", "false", "0"]:
+            self.converter.cache_enabled = False
+            yield event.plain_result("缓存已关闭")
+        else:
+            yield event.plain_result("无效的参数，请使用 on/off")

@@ -132,5 +132,30 @@
                 "default": 0.05
             }
         }
+    },
+    "cache_config": {
+        "description": "缓存设置",
+        "type": "object",
+        "hint": "转换结果缓存的相关设置",
+        "items": {
+            "cache_enabled": {
+                "description": "是否启用缓存",
+                "type": "bool",
+                "hint": "是否启用转换结果缓存",
+                "default": true
+            },
+            "cache_expire_days": {
+                "description": "缓存过期天数",
+                "type": "int",
+                "hint": "缓存文件保留的天数，超过此天数将自动删除",
+                "default": 7
+            },
+            "cache_dir": {
+                "description": "缓存目录",
+                "type": "string",
+                "hint": "缓存文件存储的目录路径",
+                "default": "data/cache/so-vits-svc"
+            }
+        }
     }
 } 
