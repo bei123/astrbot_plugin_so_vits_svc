@@ -6,7 +6,7 @@ So-Vits-SVC API 插件
 提供语音转换、MSST音频处理和网易云音乐下载功能
 """
 
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, AsyncGenerator, Any
 import os
 import time
 import uuid
@@ -23,6 +23,8 @@ from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
 from astrbot.core.message.components import Record
 from astrbot.core.star.filter.permission import PermissionType
+from astrbot.api.event import Event
+from astrbot.core.star.filter.command import Command
 from .netease_api import NeteaseMusicAPI
 from .bilibili_api import BilibiliAPI
 import asyncio
@@ -1157,7 +1159,7 @@ class SoVitsSvcPlugin(Star):
             )
         ])
 
-    async def _handle_cache_status(self, event: Event, args: List[str]) -> None:
+    async def _handle_cache_status(self, event: Event, args: List[str]) -> AsyncGenerator[Any, Any]:
         """处理缓存状态命令"""
         if not self.converter:
             yield event.plain_result("插件未初始化")
@@ -1186,7 +1188,7 @@ class SoVitsSvcPlugin(Star):
         )
         yield event.plain_result(status)
 
-    async def _handle_clear_cache(self, event: Event, args: List[str]) -> None:
+    async def _handle_clear_cache(self, event: Event, args: List[str]) -> AsyncGenerator[Any, Any]:
         """处理清理缓存命令"""
         if not self.converter:
             yield event.plain_result("插件未初始化")
@@ -1204,7 +1206,7 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"清理缓存失败: {str(e)}")
 
-    async def _handle_toggle_cache(self, event: Event, args: List[str]) -> None:
+    async def _handle_toggle_cache(self, event: Event, args: List[str]) -> AsyncGenerator[Any, Any]:
         """处理开启/关闭缓存命令"""
         if not self.converter:
             yield event.plain_result("插件未初始化")
