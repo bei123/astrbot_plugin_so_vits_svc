@@ -16,6 +16,28 @@ from astrbot.core import logger
 from .QQapi.qqmusic_api import search, song
 from .QQapi.qqmusic_api.login import get_qrcode, check_qrcode, QRLoginType, QRCodeLoginEvents
 from .QQapi.qqmusic_api.utils.credential import Credential
+from quart import Quart, Response
+import aiohttp
+from aiohttp import web
+
+
+class QQMusicRoute:
+    def __init__(self, app: Quart):
+        self.app = app
+        self.app.add_url_rule("/qqmusic/qr", view_func=self.get_qr, methods=["GET"])
+        
+    async def get_qr(self):
+        """获取QQ音乐登录二维码"""
+        try:
+            qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
+            if not os.path.exists(qr_path):
+                return Response("二维码不存在", status=404)
+                
+            with open(qr_path, "rb") as f:
+                return Response(f.read(), mimetype="image/png")
+        except Exception as e:
+            logger.error(f"获取二维码失败: {str(e)}")
+            return Response("获取二维码失败", status=500)
 
 
 class QQMusicAPI:
@@ -35,6 +57,39 @@ class QQMusicAPI:
         )
         self.credential = None
         self.credential_lock = asyncio.Lock()
+        self.qr_server = None
+        self.qr_server_port = 8081  # 使用8081端口避免与主服务器冲突
+
+    async def start_qr_server(self):
+        """启动二维码服务器"""
+        app = web.Application()
+        app.router.add_get('/qr', self.handle_qr)
+        
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, 'localhost', self.qr_server_port)
+        await site.start()
+        self.qr_server = runner
+        logger.info(f"二维码服务器已启动: http://localhost:{self.qr_server_port}/qr")
+
+    async def stop_qr_server(self):
+        """停止二维码服务器"""
+        if self.qr_server:
+            await self.qr_server.cleanup()
+            self.qr_server = None
+
+    async def handle_qr(self, request):
+        """处理二维码请求"""
+        try:
+            qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
+            if not os.path.exists(qr_path):
+                return web.Response(text="二维码不存在", status=404)
+                
+            with open(qr_path, "rb") as f:
+                return web.Response(body=f.read(), content_type="image/png")
+        except Exception as e:
+            logger.error(f"获取二维码失败: {str(e)}")
+            return web.Response(text="获取二维码失败", status=500)
 
     async def ensure_login(self) -> bool:
         """确保已登录QQ音乐
@@ -55,13 +110,18 @@ class QQMusicAPI:
             # 需要重新登录
             logger.info("正在获取QQ音乐登录二维码...")
             try:
+                # 启动二维码服务器
+                await self.start_qr_server()
+                
                 # 获取QQ登录二维码
                 qr = await get_qrcode(QRLoginType.QQ)
                 
                 # 保存二维码图片
                 qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
                 qr.save(qr_path)
-                logger.info(f"二维码已保存为 {qr_path}，请使用QQ音乐APP扫描")
+                logger.info(f"二维码已保存为 {qr_path}")
+                logger.info(f"二维码下载链接: http://localhost:{self.qr_server_port}/qr")
+                logger.info("请使用QQ音乐APP扫描二维码")
                 
                 # 等待扫码
                 while True:
@@ -71,6 +131,8 @@ class QQMusicAPI:
                         # 保存凭证
                         self._save_credential(credential)
                         self.credential = credential
+                        # 停止二维码服务器
+                        await self.stop_qr_server()
                         return True
                     elif event == QRCodeLoginEvents.SCAN:
                         logger.info("等待扫码...")
@@ -78,13 +140,16 @@ class QQMusicAPI:
                         logger.info("已扫码，等待确认...")
                     elif event == QRCodeLoginEvents.TIMEOUT:
                         logger.error("二维码已过期，请重新登录")
+                        await self.stop_qr_server()
                         return False
                     elif event == QRCodeLoginEvents.REFUSE:
                         logger.error("已拒绝登录")
+                        await self.stop_qr_server()
                         return False
                     await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"QQ音乐登录出错: {str(e)}")
+                await self.stop_qr_server()
                 return False
 
     def _save_credential(self, credential: Credential):
