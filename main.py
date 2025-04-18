@@ -577,6 +577,22 @@ class SoVitsSvcPlugin(Star):
             if source_type == "bilibili" and song_name:
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
+                    
+                    # 检查BBDown配置
+                    if not self.converter.bilibili_api.bbdown_path:
+                        yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
+                        return
+                        
+                    # 检查BBDown是否存在
+                    if not os.path.exists(self.converter.bilibili_api.bbdown_path):
+                        yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
+                        return
+                        
+                    # 检查BBDown是否有执行权限
+                    if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
+                        yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
+                        return
+                    
                     video_info = self.converter.bilibili_api.process_video(song_name)
 
                     if not video_info:
@@ -848,6 +864,22 @@ class SoVitsSvcPlugin(Star):
             
         try:
             yield event.plain_result(f"正在获取视频信息：{url_or_bvid}...")
+            
+            # 检查BBDown配置
+            if not self.converter.bilibili_api.bbdown_path:
+                yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
+                return
+                
+            # 检查BBDown是否存在
+            if not os.path.exists(self.converter.bilibili_api.bbdown_path):
+                yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
+                return
+                
+            # 检查BBDown是否有执行权限
+            if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
+                yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
+                return
+            
             video_info = self.converter.bilibili_api.get_video_info(url_or_bvid)
             
             if not video_info:

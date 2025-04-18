@@ -51,6 +51,18 @@ class BilibiliAPI:
             
             logger.info(f"执行BBDown命令: {' '.join(full_command)}")
             
+            # 检查文件是否存在
+            if not os.path.exists(self.bbdown_path):
+                error_msg = f"BBDown可执行文件不存在: {self.bbdown_path}"
+                logger.error(error_msg)
+                return -1, "", error_msg
+                
+            # 检查文件是否有执行权限
+            if not os.access(self.bbdown_path, os.X_OK):
+                error_msg = f"BBDown可执行文件没有执行权限: {self.bbdown_path}"
+                logger.error(error_msg)
+                return -1, "", error_msg
+            
             # 执行命令
             process = subprocess.Popen(
                 full_command,
