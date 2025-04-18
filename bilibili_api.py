@@ -144,10 +144,12 @@ class BilibiliAPI:
             # 使用BBDown的info功能
             # 根据BBDown文档，正确的命令格式是: BBDown <url> -info
             # 注意：URL必须放在第一个参数位置，-info放在URL后面
+            logger.info(f"尝试获取视频信息: {url}")
             returncode, stdout, stderr = self._run_bbdown([url, "-info"])
             
             if returncode != 0:
-                logger.error(f"获取视频信息失败: {stderr}")
+                logger.error(f"获取视频信息失败: 返回码={returncode}, 错误信息={stderr}")
+                logger.error(f"标准输出: {stdout}")
                 return None
             
             # 解析视频信息
@@ -175,10 +177,17 @@ class BilibiliAPI:
                             "duration": duration
                         })
             
+            # 检查是否成功解析到标题
+            if not info["title"]:
+                logger.error(f"无法解析视频标题，原始输出: {stdout}")
+                return None
+                
             return info
             
         except Exception as e:
             logger.error(f"获取视频信息出错: {str(e)}")
+            import traceback
+            logger.error(f"错误堆栈: {traceback.format_exc()}")
             return None
 
     def download_audio(self, url_or_bvid: str, part_index: Optional[int] = None, output_dir: Optional[str] = None) -> Optional[str]:
