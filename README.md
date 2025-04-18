@@ -56,6 +56,46 @@
   - 默认值: 0
   - 说明: 默认的音调调整值，范围-12到12
 
+- `default_k_step`: 默认扩散步数
+  - 默认值: 100
+  - 说明: 默认的扩散步数
+
+- `default_shallow_diffusion`: 默认使用浅扩散
+  - 默认值: true
+  - 说明: 是否默认使用浅扩散
+
+- `default_only_diffusion`: 默认使用纯扩散
+  - 默认值: false
+  - 说明: 是否默认使用纯扩散
+
+- `default_cluster_infer_ratio`: 默认聚类推理比例
+  - 默认值: 0
+  - 说明: 默认的聚类推理比例
+
+- `default_auto_predict_f0`: 默认自动预测音高
+  - 默认值: false
+  - 说明: 是否默认自动预测音高
+
+- `default_noice_scale`: 默认噪声比例
+  - 默认值: 0.4
+  - 说明: 默认的噪声比例
+
+- `default_f0_filter`: 默认过滤F0
+  - 默认值: false
+  - 说明: 是否默认过滤F0
+
+- `default_f0_predictor`: 默认F0预测器
+  - 默认值: "fcpe"
+  - 说明: 默认使用的F0预测器
+
+- `default_enhancer_adaptive_key`: 默认增强器自适应键
+  - 默认值: 0
+  - 说明: 默认的增强器自适应键值
+
+- `default_cr_threshold`: 默认交叉参考阈值
+  - 默认值: 0.05
+  - 说明: 默认的交叉参考阈值
+
 ## 使用方法
 
 ### 权限说明
@@ -130,6 +170,13 @@
 3. 配置参数是否正确
 4. 上传的音频文件格式是否支持
 5. 网易云音乐 cookie 是否有效
+
+## API 实现
+
+本插件使用的 API 实现参考：
+
+- MSST-WebUI API: https://github.com/bei123/MSST-WebUI/blob/api/scripts/preset_infer_api.py
+- So-Vits-SVC API: https://github.com/bei123/so-vits-svc/blob/api/flask_api_full_song.py
 
 ## 致谢
 
