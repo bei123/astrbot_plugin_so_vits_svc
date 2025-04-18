@@ -118,6 +118,12 @@ class QQMusicAPI:
                 
                 # 保存二维码到QQapi目录
                 qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
+                # 如果文件或目录已存在,先删除
+                if os.path.exists(qr_path):
+                    if os.path.isdir(qr_path):
+                        os.rmdir(qr_path)
+                    else:
+                        os.remove(qr_path)
                 qr.save(qr_path)
                 
                 # 读取文件并转换为base64
