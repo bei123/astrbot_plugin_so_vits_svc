@@ -23,7 +23,7 @@ from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
 from astrbot.core.message.components import Record
 from astrbot.core.star.filter.permission import PermissionType
-from astrbot.api.event import Event
+from astrbot.api.event import filter
 from astrbot.core.star.filter.command import Command
 from .netease_api import NeteaseMusicAPI
 from .bilibili_api import BilibiliAPI
@@ -1159,7 +1159,7 @@ class SoVitsSvcPlugin(Star):
             )
         ])
 
-    async def _handle_cache_status(self, event: Event, args: List[str]) -> AsyncGenerator[Any, Any]:
+    async def _handle_cache_status(self, event: AstrMessageEvent, args: List[str]) -> AsyncGenerator[Any, Any]:
         """处理缓存状态命令"""
         if not self.converter:
             yield event.plain_result("插件未初始化")
@@ -1188,7 +1188,7 @@ class SoVitsSvcPlugin(Star):
         )
         yield event.plain_result(status)
 
-    async def _handle_clear_cache(self, event: Event, args: List[str]) -> AsyncGenerator[Any, Any]:
+    async def _handle_clear_cache(self, event: AstrMessageEvent, args: List[str]) -> AsyncGenerator[Any, Any]:
         """处理清理缓存命令"""
         if not self.converter:
             yield event.plain_result("插件未初始化")
@@ -1206,7 +1206,7 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"清理缓存失败: {str(e)}")
 
-    async def _handle_toggle_cache(self, event: Event, args: List[str]) -> AsyncGenerator[Any, Any]:
+    async def _handle_toggle_cache(self, event: AstrMessageEvent, args: List[str]) -> AsyncGenerator[Any, Any]:
         """处理开启/关闭缓存命令"""
         if not self.converter:
             yield event.plain_result("插件未初始化")
