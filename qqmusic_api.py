@@ -13,6 +13,7 @@ import httpx
 import anyio
 import base64
 import shutil
+import time
 from typing import Dict, Optional, List
 from astrbot.core import logger
 from .QQapi.qqmusic_api import search, song
@@ -94,6 +95,31 @@ class QQMusicAPI:
             logger.error(f"获取二维码失败: {str(e)}")
             return web.Response(text="获取二维码失败", status=500)
 
+    def _cleanup_qr_path(self, qr_path: str) -> bool:
+        """清理二维码路径
+        
+        Args:
+            qr_path: 二维码文件路径
+            
+        Returns:
+            bool: 是否清理成功
+        """
+        try:
+            if os.path.exists(qr_path):
+                if os.path.isdir(qr_path):
+                    logger.info(f"正在删除目录: {qr_path}")
+                    shutil.rmtree(qr_path)
+                else:
+                    logger.info(f"正在删除文件: {qr_path}")
+                    os.remove(qr_path)
+                # 等待一小段时间确保文件系统操作完成
+                time.sleep(0.1)
+                return True
+            return True
+        except Exception as e:
+            logger.error(f"清理二维码路径失败: {str(e)}")
+            return False
+
     async def ensure_login(self) -> bool:
         """确保已登录QQ音乐
 
@@ -117,18 +143,34 @@ class QQMusicAPI:
                 qr = await get_qrcode(QRLoginType.QQ)
                 
                 # 保存二维码到QQapi目录
-                qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
-                # 如果文件或目录已存在,先删除
-                if os.path.exists(qr_path):
-                    if os.path.isdir(qr_path):
-                        shutil.rmtree(qr_path)
-                    else:
-                        os.remove(qr_path)
-                qr.save(qr_path)
+                qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi")
+                qr_path = os.path.join(qr_dir, "login_qr.png")
+                
+                # 清理旧文件
+                if not self._cleanup_qr_path(qr_path):
+                    logger.error("无法清理旧的二维码文件，请手动删除后再试")
+                    return False
+                
+                # 确保目录存在
+                os.makedirs(qr_dir, exist_ok=True)
+                
+                # 保存新二维码
+                try:
+                    # 直接保存为文件，不创建目录
+                    with open(qr_path, "wb") as f:
+                        f.write(qr.getvalue())
+                    logger.info(f"二维码已保存到: {qr_path}")
+                except Exception as e:
+                    logger.error(f"保存二维码失败: {str(e)}")
+                    return False
                 
                 # 读取文件并转换为base64
-                with open(qr_path, "rb") as f:
-                    qr_base64 = base64.b64encode(f.read()).decode()
+                try:
+                    with open(qr_path, "rb") as f:
+                        qr_base64 = base64.b64encode(f.read()).decode()
+                except Exception as e:
+                    logger.error(f"读取二维码文件失败: {str(e)}")
+                    return False
                 
                 # 输出二维码的base64数据
                 logger.info("请复制以下链接到浏览器打开二维码:")
