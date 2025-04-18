@@ -110,17 +110,16 @@ class QQMusicAPI:
             # 需要重新登录
             logger.info("正在获取QQ音乐登录二维码...")
             try:
-                # 启动二维码服务器
-                await self.start_qr_server()
-                
                 # 获取QQ登录二维码
                 qr = await get_qrcode(QRLoginType.QQ)
                 
-                # 保存二维码图片
-                qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
+                # 保存二维码图片到静态文件目录
+                static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dist", "static")
+                os.makedirs(static_dir, exist_ok=True)
+                qr_path = os.path.join(static_dir, "qqmusic_qr.png")
                 qr.save(qr_path)
                 logger.info(f"二维码已保存为 {qr_path}")
-                logger.info(f"二维码下载链接: http://localhost:{self.qr_server_port}/qr")
+                logger.info(f"二维码下载链接: http://localhost:6185/static/qqmusic_qr.png")
                 logger.info("请使用QQ音乐APP扫描二维码")
                 
                 # 等待扫码
@@ -131,8 +130,11 @@ class QQMusicAPI:
                         # 保存凭证
                         self._save_credential(credential)
                         self.credential = credential
-                        # 停止二维码服务器
-                        await self.stop_qr_server()
+                        # 删除二维码文件
+                        try:
+                            os.remove(qr_path)
+                        except:
+                            pass
                         return True
                     elif event == QRCodeLoginEvents.SCAN:
                         logger.info("等待扫码...")
@@ -140,16 +142,25 @@ class QQMusicAPI:
                         logger.info("已扫码，等待确认...")
                     elif event == QRCodeLoginEvents.TIMEOUT:
                         logger.error("二维码已过期，请重新登录")
-                        await self.stop_qr_server()
+                        try:
+                            os.remove(qr_path)
+                        except:
+                            pass
                         return False
                     elif event == QRCodeLoginEvents.REFUSE:
                         logger.error("已拒绝登录")
-                        await self.stop_qr_server()
+                        try:
+                            os.remove(qr_path)
+                        except:
+                            pass
                         return False
                     await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"QQ音乐登录出错: {str(e)}")
-                await self.stop_qr_server()
+                try:
+                    os.remove(qr_path)
+                except:
+                    pass
                 return False
 
     def _save_credential(self, credential: Credential):
