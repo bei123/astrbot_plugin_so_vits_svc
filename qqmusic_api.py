@@ -121,7 +121,7 @@ class QQMusicAPI:
                 # 如果文件或目录已存在,先删除
                 if os.path.exists(qr_path):
                     if os.path.isdir(qr_path):
-                        os.rmdir(qr_path)
+                        shutil.rmtree(qr_path)
                     else:
                         os.remove(qr_path)
                 qr.save(qr_path)
