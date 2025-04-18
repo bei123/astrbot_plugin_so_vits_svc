@@ -128,11 +128,20 @@ class BilibiliAPI:
                 return None
                 
             # 使用BBDown的info功能
+            # 注意：BBDown命令格式应该是 BBDown --info [URL或BV号]
+            # 确保使用正确的命令格式
             returncode, stdout, stderr = self._run_bbdown(["--info", bvid])
             
             if returncode != 0:
-                logger.error(f"获取视频信息失败: {stderr}")
-                return None
+                # 尝试使用URL格式
+                if not url_or_bvid.startswith("http"):
+                    url = f"https://www.bilibili.com/video/{bvid}"
+                    logger.info(f"尝试使用URL格式: {url}")
+                    returncode, stdout, stderr = self._run_bbdown(["--info", url])
+                
+                if returncode != 0:
+                    logger.error(f"获取视频信息失败: {stderr}")
+                    return None
             
             # 解析视频信息
             info = {
@@ -195,7 +204,13 @@ class BilibiliAPI:
                 command.extend(["-p", str(part_index)])
             
             # 添加视频ID
-            command.append(bvid)
+            # 尝试使用URL格式，这通常更可靠
+            if not url_or_bvid.startswith("http"):
+                url = f"https://www.bilibili.com/video/{bvid}"
+                logger.info(f"使用URL格式: {url}")
+                command.append(url)
+            else:
+                command.append(url_or_bvid)
             
             # 执行下载
             returncode, stdout, stderr = self._run_bbdown(command)

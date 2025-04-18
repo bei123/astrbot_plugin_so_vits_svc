@@ -188,6 +188,7 @@
    chmod +x /path/to/BBDown
    ```
    如果遇到权限问题，请检查 BBDown 的安装路径和权限设置。
+9. 使用 BBDown 时，请确保使用正确的命令格式。BBDown 通常需要完整的 URL 或正确格式的 BV 号。如果遇到 "Unrecognized command or argument" 错误，请尝试使用完整的 URL 格式，例如 `https://www.bilibili.com/video/BV1xx411c7mD`。
 
 ## 问题反馈
 
