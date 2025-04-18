@@ -120,6 +120,28 @@ class QQMusicAPI:
             logger.error(f"清理二维码路径失败: {str(e)}")
             return False
 
+    def _get_latest_qr_file(self, qr_dir: str) -> str:
+        """获取目录中最新的二维码文件
+        
+        Args:
+            qr_dir: 二维码目录路径
+            
+        Returns:
+            str: 最新二维码文件的完整路径
+        """
+        try:
+            # 获取目录中所有的png文件
+            qr_files = [f for f in os.listdir(qr_dir) if f.endswith('.png')]
+            if not qr_files:
+                return None
+                
+            # 按修改时间排序，获取最新的文件
+            latest_file = max(qr_files, key=lambda f: os.path.getmtime(os.path.join(qr_dir, f)))
+            return os.path.join(qr_dir, latest_file)
+        except Exception as e:
+            logger.error(f"获取最新二维码文件失败: {str(e)}")
+            return None
+
     async def ensure_login(self) -> bool:
         """确保已登录QQ音乐
 
@@ -143,29 +165,27 @@ class QQMusicAPI:
                 qr = await get_qrcode(QRLoginType.QQ)
                 
                 # 保存二维码到QQapi目录
-                qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi")
-                qr_path = os.path.join(qr_dir, "login_qr.png")
-                
-                # 清理旧文件
-                if not self._cleanup_qr_path(qr_path):
-                    logger.error("无法清理旧的二维码文件，请手动删除后再试")
-                    return False
+                qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
                 
                 # 确保目录存在
                 os.makedirs(qr_dir, exist_ok=True)
                 
                 # 保存新二维码
                 try:
-                    # 使用save方法保存二维码
-                    qr.save(qr_path)
-                    logger.info(f"二维码已保存到: {qr_path}")
+                    qr.save(qr_dir)
+                    logger.info(f"二维码已保存到: {qr_dir}")
                 except Exception as e:
                     logger.error(f"保存二维码失败: {str(e)}")
                     return False
                 
-                # 读取文件并转换为base64
+                # 获取最新的二维码文件并转换为base64
                 try:
-                    with open(qr_path, "rb") as f:
+                    latest_qr_file = self._get_latest_qr_file(qr_dir)
+                    if not latest_qr_file:
+                        logger.error("未找到二维码文件")
+                        return False
+                        
+                    with open(latest_qr_file, "rb") as f:
                         qr_base64 = base64.b64encode(f.read()).decode()
                 except Exception as e:
                     logger.error(f"读取二维码文件失败: {str(e)}")
