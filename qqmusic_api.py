@@ -12,6 +12,7 @@ import asyncio
 import httpx
 import anyio
 import base64
+import shutil
 from typing import Dict, Optional, List
 from astrbot.core import logger
 from .QQapi.qqmusic_api import search, song
@@ -115,21 +116,13 @@ class QQMusicAPI:
                 # 获取QQ登录二维码
                 qr = await get_qrcode(QRLoginType.QQ)
                 
-                # 保存二维码到临时文件
-                temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
-                os.makedirs(temp_dir, exist_ok=True)
-                qr_path = os.path.join(temp_dir, "login_qr.png")
+                # 保存二维码到QQapi目录
+                qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
                 qr.save(qr_path)
                 
                 # 读取文件并转换为base64
                 with open(qr_path, "rb") as f:
                     qr_base64 = base64.b64encode(f.read()).decode()
-                
-                # 删除临时文件
-                try:
-                    os.remove(qr_path)
-                except:
-                    pass
                 
                 # 输出二维码的base64数据
                 logger.info("请复制以下链接到浏览器打开二维码:")
