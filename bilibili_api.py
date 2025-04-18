@@ -54,36 +54,33 @@ class BilibiliAPI:
                 logger.error(error_msg)
                 return -1, "", error_msg
             
-            # 构建完整命令
-            # BBDown的正确命令格式是: BBDown <url> [command] [options]
-            # 我们需要确保URL是第一个参数
-            # 在Linux环境中，需要使用./执行本地可执行文件
-            if os.name == 'posix':  # Linux/Unix系统
-                bbdown_executable = f"./{self.bbdown_path}"
-            else:  # Windows系统
-                bbdown_executable = self.bbdown_path
-                
-            full_command = [bbdown_executable]
+            # 构建完整命令字符串
+            # 使用shell=True，让系统通过shell来执行命令
+            cmd_str = f'"{self.bbdown_path}"'
             
             # 如果有cookie，添加cookie参数
             if self.bbdown_cookie:
-                full_command.extend(["-c", self.bbdown_cookie])
+                cmd_str += f' -c "{self.bbdown_cookie}"'
             
             # 添加其他参数
-            full_command.extend(command)
+            for arg in command:
+                if ' ' in arg:
+                    cmd_str += f' "{arg}"'
+                else:
+                    cmd_str += f' {arg}'
             
-            logger.info(f"执行BBDown命令: {' '.join(full_command)}")
+            logger.info(f"执行BBDown命令: {cmd_str}")
             
             # 执行命令
-            process = subprocess.Popen(
-                full_command,
+            result = subprocess.run(
+                cmd_str,
+                shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
             )
             
-            stdout, stderr = process.communicate()
-            return process.returncode, stdout, stderr
+            return result.returncode, result.stdout, result.stderr
             
         except Exception as e:
             logger.error(f"执行BBDown命令出错: {str(e)}")
