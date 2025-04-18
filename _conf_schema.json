@@ -136,25 +136,25 @@
     "cache_config": {
         "description": "缓存设置",
         "type": "object",
-        "hint": "转换结果缓存的相关设置",
+        "hint": "缓存相关的配置参数",
         "items": {
-            "cache_enabled": {
-                "description": "是否启用缓存",
-                "type": "bool",
-                "hint": "是否启用转换结果缓存",
-                "default": true
-            },
-            "cache_expire_days": {
-                "description": "缓存过期天数",
-                "type": "int",
-                "hint": "缓存文件保留的天数，超过此天数将自动删除",
-                "default": 7
-            },
             "cache_dir": {
                 "description": "缓存目录",
                 "type": "string",
-                "hint": "缓存文件存储的目录路径",
+                "hint": "存储缓存文件的目录路径",
                 "default": "data/cache/so-vits-svc"
+            },
+            "max_cache_size": {
+                "description": "最大缓存大小(字节)",
+                "type": "integer",
+                "hint": "缓存的最大容量，默认1GB",
+                "default": 1073741824
+            },
+            "max_cache_age": {
+                "description": "最大缓存时间(秒)",
+                "type": "integer",
+                "hint": "缓存文件的最大保存时间，默认7天",
+                "default": 604800
             }
         }
     }
