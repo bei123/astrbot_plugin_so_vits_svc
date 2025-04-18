@@ -192,7 +192,7 @@
 
 2. BBDown 命令格式说明：
    - 正确的命令格式为：`BBDown <url> [command] [options]`
-   - 例如：`BBDown https://www.bilibili.com/video/BV1YYdAYVEtT --info`
+   - 例如：`BBDown https://www.bilibili.com/video/BV1YYdAYVEtT -info`
    - 注意：URL 必须放在命令参数之前
 
 3. 如果遇到问题，请检查：

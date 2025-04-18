@@ -139,9 +139,9 @@ class BilibiliAPI:
                 url = url_or_bvid
                 
             # 使用BBDown的info功能
-            # 根据BBDown文档，正确的命令格式是: BBDown <url> --info
-            # 注意：URL必须放在第一个参数位置，--info放在URL后面
-            returncode, stdout, stderr = self._run_bbdown([url, "--info"])
+            # 根据BBDown文档，正确的命令格式是: BBDown <url> -info
+            # 注意：URL必须放在第一个参数位置，-info放在URL后面
+            returncode, stdout, stderr = self._run_bbdown([url, "-info"])
             
             if returncode != 0:
                 logger.error(f"获取视频信息失败: {stderr}")
