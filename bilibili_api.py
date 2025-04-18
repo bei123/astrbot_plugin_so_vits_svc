@@ -12,6 +12,7 @@ import requests
 import subprocess
 import tempfile
 import re
+import time
 from typing import Dict, Optional, List, Tuple
 from astrbot.core import logger
 
@@ -31,6 +32,28 @@ class BilibiliAPI:
         self.bbdown_cookie = self.base_setting.get("bbdown_cookie", "")
         self.temp_dir = os.path.join("data", "temp", "bilibili")
         os.makedirs(self.temp_dir, exist_ok=True)
+        
+        # 临时文件清理设置
+        self.max_temp_age = 24 * 60 * 60  # 临时文件最大保存时间（24小时）
+        self.cleanup_temp_files()  # 初始化时清理旧的临时文件
+
+    def cleanup_temp_files(self):
+        """清理过期的临时文件"""
+        try:
+            current_time = time.time()
+            for filename in os.listdir(self.temp_dir):
+                file_path = os.path.join(self.temp_dir, filename)
+                # 检查文件最后修改时间
+                if os.path.isfile(file_path):
+                    file_age = current_time - os.path.getmtime(file_path)
+                    if file_age > self.max_temp_age:
+                        try:
+                            os.remove(file_path)
+                            logger.info(f"已清理过期临时文件: {file_path}")
+                        except OSError as e:
+                            logger.error(f"清理临时文件失败: {str(e)}")
+        except Exception as e:
+            logger.error(f"清理临时文件时出错: {str(e)}")
 
     def _run_bbdown(self, command: List[str]) -> Tuple[int, str, str]:
         """运行BBDown命令
@@ -202,6 +225,9 @@ class BilibiliAPI:
             下载的音频文件路径，失败返回None
         """
         try:
+            # 清理过期的临时文件
+            self.cleanup_temp_files()
+            
             # 提取BV号
             bvid = self.extract_bvid(url_or_bvid)
             if not bvid:
@@ -261,56 +287,67 @@ class BilibiliAPI:
             url_or_bvid: 视频URL或BV号
 
         Returns:
-            视频信息，包括下载的音频文件路径
+            包含视频信息和音频文件路径的字典
         """
-        # 1. 获取视频信息
-        video_info = self.get_video_info(url_or_bvid)
-        
-        if not video_info:
-            logger.error(f"获取视频信息失败: {url_or_bvid}")
+        try:
+            # 清理过期的临时文件
+            self.cleanup_temp_files()
+            
+            # 获取视频信息
+            video_info = self.get_video_info(url_or_bvid)
+            if not video_info:
+                return None
+                
+            # 下载音频
+            audio_file = self.download_audio(url_or_bvid)
+            if not audio_file:
+                return None
+                
+            # 添加音频文件路径到视频信息中
+            video_info["audio_file"] = audio_file
+            return video_info
+            
+        except Exception as e:
+            logger.error(f"处理视频时出错: {str(e)}")
             return None
-        
-        # 2. 下载音频
-        audio_file = self.download_audio(url_or_bvid)
-        
-        if not audio_file:
-            logger.error(f"下载音频失败: {url_or_bvid}")
-            return None
-        
-        # 3. 返回结果
-        return {
-            "status": 200,
-            "bvid": video_info["bvid"],
-            "title": video_info["title"],
-            "uploader": video_info["uploader"],
-            "audio_file": audio_file,
-            "parts": video_info["parts"]
-        }
 
     def download_song(self, video_info: Dict, save_path: Optional[str] = None) -> Optional[str]:
-        """下载视频音频
+        """下载歌曲
 
         Args:
-            video_info: 视频信息，包含bvid字段
-            save_path: 保存路径，默认为临时目录
+            video_info: 视频信息字典
+            save_path: 保存路径，默认为None，将使用临时目录
 
         Returns:
-            下载的文件路径
+            下载的文件路径，失败返回None
         """
-        if not video_info or not video_info.get("bvid"):
-            logger.error("无效的视频信息")
+        try:
+            # 清理过期的临时文件
+            self.cleanup_temp_files()
+            
+            if not video_info or not video_info.get("audio_file"):
+                return None
+                
+            if not save_path:
+                save_path = self.temp_dir
+                
+            # 构建目标文件路径
+            source_file = video_info["audio_file"]
+            target_file = os.path.join(save_path, os.path.basename(source_file))
+            
+            # 如果源文件和目标文件相同，直接返回
+            if os.path.abspath(source_file) == os.path.abspath(target_file):
+                return source_file
+                
+            # 复制文件
+            import shutil
+            shutil.copy2(source_file, target_file)
+            
+            return target_file
+            
+        except Exception as e:
+            logger.error(f"下载歌曲时出错: {str(e)}")
             return None
-        
-        bvid = video_info["bvid"]
-        
-        if save_path:
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
-            output_dir = save_path
-        else:
-            output_dir = self.temp_dir
-        
-        return self.download_audio(bvid, output_dir=output_dir)
 
 
 # 使用示例
