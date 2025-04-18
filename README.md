@@ -293,6 +293,7 @@
 - [So-Vits-SVC](https://github.com/svc-develop-team/so-vits-svc) - 用于语音转换
 - [Netease_url](https://github.com/Suxiaoqinx/Netease_url) - 用于网易云音乐解析和下载
 - [BBDown](https://github.com/nilaoda/BBDown) - 用于哔哩哔哩视频下载
+- [QQMusicApi](https://github.com/luren-dc/QQMusicApi) - 用于QQ音乐解析和下载
 
 感谢这些优秀的开源项目。
 
