@@ -830,7 +830,7 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"获取预设列表失败：{str(e)}")
 
-    @permission_type(PermissionType.ADMIN)
+    
     @command("bilibili_info")
     async def get_bilibili_info(self, event: AstrMessageEvent):
         """获取哔哩哔哩视频信息
