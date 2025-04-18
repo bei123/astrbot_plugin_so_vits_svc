@@ -22,6 +22,7 @@ from astrbot.core import logger
 from astrbot.core.message.components import Record
 from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
+from .bilibili_api import BilibiliAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from astrbot.api.event import filter
@@ -174,6 +175,7 @@ class VoiceConverter:
         self.session = requests.Session()
         self.msst_processor = MSSTProcessor(self.msst_url)
         self.netease_api = NeteaseMusicAPI(self.config)
+        self.bilibili_api = BilibiliAPI(self.config)
 
     def check_health(self) -> Optional[Dict]:
         """检查服务健康状态
@@ -534,6 +536,7 @@ class SoVitsSvcPlugin(Star):
         用法：
             1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
             2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
+            3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
         """
         # 解析参数
         message = event.message_str.strip()
@@ -541,6 +544,7 @@ class SoVitsSvcPlugin(Star):
         speaker_id = None
         pitch_adjust = None
         song_name = None
+        source_type = "file"  # 默认为文件上传
 
         if len(args) >= 2:
             speaker_id = args[0]
@@ -553,7 +557,13 @@ class SoVitsSvcPlugin(Star):
                 return
 
             if len(args) > 2:
-                song_name = " ".join(args[2:])
+                # 检查是否指定了来源类型
+                if args[2].lower() == "bilibili":
+                    source_type = "bilibili"
+                    if len(args) > 3:
+                        song_name = " ".join(args[3:])
+                else:
+                    song_name = " ".join(args[2:])
 
         # 生成临时文件路径
         input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
@@ -563,8 +573,35 @@ class SoVitsSvcPlugin(Star):
         task_id = str(uuid.uuid4())
 
         try:
-            # 如果指定了歌曲名，从网易云下载
-            if song_name:
+            # 根据来源类型处理音频
+            if source_type == "bilibili" and song_name:
+                try:
+                    yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
+                    video_info = self.converter.bilibili_api.process_video(song_name)
+
+                    if not video_info:
+                        yield event.plain_result(f"处理视频失败：{song_name}")
+                        return
+
+                    yield event.plain_result(
+                        f"找到视频：{video_info.get('title', '未知视频')} - {video_info.get('uploader', '未知UP主')}\n"
+                        f"正在下载音频..."
+                    )
+
+                    downloaded_file = video_info.get("audio_file")
+                    if not downloaded_file or not os.path.exists(downloaded_file):
+                        yield event.plain_result("下载音频失败！")
+                        return
+
+                    # 将下载的音频文件复制到输入文件路径
+                    import shutil
+                    shutil.copy(downloaded_file, input_file)
+
+                except Exception as e:
+                    logger.error(f"处理哔哩哔哩视频时出错: {str(e)}")
+                    yield event.plain_result(f"处理/下载视频时出错：{str(e)}")
+                    return
+            elif song_name:
                 try:
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
                     song_info = (
@@ -618,7 +655,8 @@ class SoVitsSvcPlugin(Star):
                         "请上传要转换的音频文件或指定歌曲名！\n"
                         "用法：\n"
                         "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
-                        "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐"
+                        "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
+                        "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频"
                     )
                     return
 
@@ -791,3 +829,46 @@ class SoVitsSvcPlugin(Star):
 
         except Exception as e:
             yield event.plain_result(f"获取预设列表失败：{str(e)}")
+
+    @permission_type(PermissionType.ADMIN)
+    @command("bilibili_info")
+    async def get_bilibili_info(self, event: AstrMessageEvent):
+        """获取哔哩哔哩视频信息
+
+        用法：/bilibili_info [BV号或链接]
+        """
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []
+        
+        if not args:
+            yield event.plain_result("请提供视频BV号或链接！\n用法：/bilibili_info [BV号或链接]")
+            return
+            
+        url_or_bvid = args[0]
+            
+        try:
+            yield event.plain_result(f"正在获取视频信息：{url_or_bvid}...")
+            video_info = self.converter.bilibili_api.get_video_info(url_or_bvid)
+            
+            if not video_info:
+                yield event.plain_result(f"获取视频信息失败：{url_or_bvid}")
+                return
+                
+            result = f"视频信息：\n"
+            result += f"标题：{video_info['title']}\n"
+            result += f"UP主：{video_info['uploader']}\n"
+            result += f"分P数量：{len(video_info['parts'])}\n\n"
+            
+            if video_info['parts']:
+                result += "分P列表：\n"
+                for part in video_info['parts']:
+                    result += f"{part['index']}. {part['title']} ({part['duration']})\n"
+                    
+            result += "\n使用方法：\n"
+            result += f"/convert_voice [说话人ID] [音调调整] bilibili {url_or_bvid}"
+            
+            yield event.plain_result(result)
+            
+        except Exception as e:
+            logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}")
+            yield event.plain_result(f"获取视频信息时出错：{str(e)}")
