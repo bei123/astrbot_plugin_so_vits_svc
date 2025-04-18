@@ -17,19 +17,17 @@ import hashlib
 import shutil
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
-from astrbot.api.event.filter import command, permission_type
 from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
 from astrbot.core.message.components import Record
 from astrbot.core.star.filter.permission import PermissionType
-from astrbot.api.event import filter
-from astrbot.core.star.filter.command import Command
+from astrbot.api.event import Event, filter
+from astrbot.core.star.register import register_command, register_command_group
 from .netease_api import NeteaseMusicAPI
 from .bilibili_api import BilibiliAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from astrbot.api.event import filter
 
 class MSSTProcessor:
     """MSST 音频处理器"""
@@ -700,13 +698,13 @@ class SoVitsSvcPlugin(Star):
                 if current_time - os.path.getmtime(file_path) > self.cache_expire_days * 86400:
                     os.remove(file_path)
 
-    @command("helloworld")
+    @register_command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
         """测试插件是否正常工作"""
         yield event.plain_result("So-Vits-SVC 插件已加载！")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_status")
+    @register_command("svc_status")
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
         health = self.converter.check_health()
@@ -729,14 +727,16 @@ class SoVitsSvcPlugin(Star):
 
         yield event.plain_result(status)
 
-    @filter.command("唱", alias={"牢剑唱", "转换"})
+    @register_command("唱", alias={"牢剑唱", "转换"})
     async def handle_convert_voice(self, event: AstrMessageEvent):
         """转换语音
 
-        用法：
-            1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
-            2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
-            3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
+        用法：/唱 [说话人ID] [音调调整] [音频文件/网易云音乐ID/哔哩哔哩BV号]
+        示例：/唱 - 使用默认说话人和音调转换上传的音频
+              /唱 1 - 使用说话人1转换上传的音频
+              /唱 1 12 - 使用说话人1，升高12个半音转换上传的音频
+              /唱 1 12 1924680868 - 转换网易云音乐ID为1924680868的音频
+              /唱 1 12 BV1A34y1e7wL - 转换BV号为BV1A34y1e7wL的视频音频
         """
         # 解析参数
         message = event.message_str.strip()
@@ -917,14 +917,9 @@ class SoVitsSvcPlugin(Star):
                 logger.error(f"清理临时文件失败: {str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_speakers", alias=["说话人列表"])
+    @register_command("svc_speakers", alias=["说话人列表"])
     async def show_speakers(self, event: AstrMessageEvent):
-        """展示当前可用的说话人列表，支持切换默认说话人
-
-        用法：/svc_speakers [说话人ID]
-        示例：/svc_speakers - 显示说话人列表
-              /svc_speakers 1 - 设置默认说话人为1
-        """
+        """显示可用的说话人列表"""
         message = event.message_str.strip()
         args = message.split()[1:] if message else []
 
@@ -968,9 +963,9 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_presets", alias=["预设列表"])
+    @register_command("svc_presets", alias=["预设列表"])
     async def show_presets(self, event: AstrMessageEvent):
-        """展示当前可用的预设列表"""
+        """显示可用的预设列表"""
         try:
             presets = self.converter.msst_processor.get_presets()
             if not presets:
@@ -992,12 +987,9 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取预设列表失败：{str(e)}")
 
     
-    @command("bilibili_info")
+    @register_command("bilibili_info")
     async def get_bilibili_info(self, event: AstrMessageEvent):
-        """获取哔哩哔哩视频信息
-
-        用法：/bilibili_info [BV号或链接]
-        """
+        """获取 Bilibili 视频信息"""
         message = event.message_str.strip()
         args = message.split()[1:] if message else []
         
@@ -1051,7 +1043,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取视频信息时出错：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_cache_clear")
+    @register_command("svc_cache_clear")
     async def clear_cache(self, event: AstrMessageEvent):
         """清理缓存"""
         try:
@@ -1075,9 +1067,9 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"清理缓存失败: {str(e)}")
     
     @permission_type(PermissionType.ADMIN)
-    @command("svc_cache_status")
+    @register_command("svc_cache_status")
     async def cache_status(self, event: AstrMessageEvent):
-        """查看缓存状态"""
+        """显示缓存状态"""
         try:
             if not os.path.exists(self.cache_dir):
                 yield event.plain_result("缓存目录不存在。")
@@ -1114,7 +1106,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取缓存状态失败: {str(e)}")
     
     @permission_type(PermissionType.ADMIN)
-    @command("svc_cache_toggle")
+    @register_command("svc_cache_toggle")
     async def toggle_cache(self, event: AstrMessageEvent):
         """切换缓存状态"""
         try:
