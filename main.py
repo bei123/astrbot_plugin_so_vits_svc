@@ -106,7 +106,7 @@ class MSSTProcessor:
             try:
                 logger.info(f"开始处理音频文件: {input_file}")
                 logger.info(f"使用预设: {preset_name}")
-                
+
                 available_preset = self.find_available_preset(preset_name)
                 logger.info(f"使用预设文件: {available_preset}")
 
@@ -183,10 +183,10 @@ class MSSTProcessor:
         """
         try:
             logger.info(f"开始下载文件: {filename} -> {output_path}")
-            
+
             # 确保输出目录存在
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.api_url}/download/{filename}", timeout=300) as response:
                     if response.status == 200:
@@ -194,7 +194,7 @@ class MSSTProcessor:
                             async for chunk in response.content.iter_chunked(8192):
                                 if chunk:
                                     f.write(chunk)
-                        
+
                         # 验证文件
                         if os.path.exists(output_path):
                             file_size = os.path.getsize(output_path)
@@ -574,7 +574,7 @@ class VoiceConverter:
         """转换语音"""
         try:
             logger.info(f"开始语音转换流程，输入文件: {input_wav}, 输出文件: {output_wav}")
-            
+
             # 确保临时目录存在
             output_dir = os.path.dirname(output_wav)
             try:
@@ -675,11 +675,11 @@ class VoiceConverter:
                                 # 保存转换后的音频
                                 audio_content = await response.read()
                                 logger.info(f"收到音频数据，大小: {len(audio_content)} 字节")
-                                
+
                                 if len(audio_content) == 0:
                                     logger.error("收到的音频数据为空")
                                     return False
-                                
+
                                 with open(output_wav, "wb") as f:
                                     f.write(audio_content)
                                 logger.info(f"音频文件已保存: {output_wav}")
@@ -688,12 +688,12 @@ class VoiceConverter:
                                 if not os.path.exists(output_wav):
                                     logger.error(f"输出文件不存在: {output_wav}")
                                     return False
-                                    
+
                                 output_size = os.path.getsize(output_wav)
                                 if output_size == 0:
                                     logger.error("输出文件大小为0")
                                     return False
-                                    
+
                                 logger.info(f"输出文件大小: {output_size} 字节")
 
                                 process_time = time.time() - start_time
@@ -1054,10 +1054,8 @@ class SoVitsSvcPlugin(Star):
             elif song_name:
                 try:
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
-                    song_info = (
-                        self.converter.netease_api.get_song_with_highest_quality(
-                            song_name
-                        )
+                    song_info = await self.converter.netease_api.get_song_with_highest_quality(
+                        song_name
                     )
 
                     if not song_info:
@@ -1077,7 +1075,7 @@ class SoVitsSvcPlugin(Star):
                         f"正在下载..."
                     )
 
-                    downloaded_file = self.converter.netease_api.download_song(
+                    downloaded_file = await self.converter.netease_api.download_song(
                         song_info, self.temp_dir
                     )
                     if not downloaded_file:
@@ -1199,23 +1197,23 @@ class SoVitsSvcPlugin(Star):
                 logger.error(f"人声文件不存在: {vocal_file}")
                 yield event.plain_result("人声文件不存在")
                 return
-                
+
             if not os.path.exists(inst_file):
                 logger.error(f"伴奏文件不存在: {inst_file}")
                 yield event.plain_result("伴奏文件不存在")
                 return
-                
+
             # 检查文件大小
             vocal_size = os.path.getsize(vocal_file)
             inst_size = os.path.getsize(inst_file)
             logger.info(f"人声文件大小: {vocal_size} 字节")
             logger.info(f"伴奏文件大小: {inst_size} 字节")
-            
+
             if vocal_size == 0 or inst_size == 0:
                 logger.error("文件大小为0")
                 yield event.plain_result("文件大小为0")
                 return
-                
+
             # 转换人声
             yield event.plain_result("正在转换人声...")
             try:
