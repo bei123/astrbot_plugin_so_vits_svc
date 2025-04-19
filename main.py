@@ -1301,7 +1301,7 @@ class SoVitsSvcPlugin(Star):
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""
         try:
-            presets = self.converter.msst_processor.get_presets()
+            presets = await self.converter.msst_processor.get_presets()
             if not presets:
                 yield event.plain_result(
                     "获取预设列表失败，请检查 MSST-WebUI 服务是否正常运行。"
@@ -1319,7 +1319,6 @@ class SoVitsSvcPlugin(Star):
 
         except Exception as e:
             yield event.plain_result(f"获取预设列表失败：{str(e)}")
-
 
     @command("bilibili_info")
     async def get_bilibili_info(self, event: AstrMessageEvent):
