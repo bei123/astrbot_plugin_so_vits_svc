@@ -507,44 +507,14 @@ class VoiceConverter:
         """异步转换语音"""
         async with self.task_lock:  # 使用锁确保同一时间只有一个任务在执行
             if self.current_task is not None:
-                raise RuntimeError("当前已有任务正在处理，请等待完成后再试")
+                logger.error("当前已有任务正在处理")
+                return False
 
             try:
                 self.current_task = asyncio.current_task()
+                logger.info(f"开始异步语音转换任务，输入文件: {input_wav}")
 
-                # 使用默认值
-                speaker_id = speaker_id or self.default_speaker
-                pitch_adjust = pitch_adjust if pitch_adjust is not None else self.default_pitch
-                k_step = k_step or self.default_k_step
-                shallow_diffusion = shallow_diffusion if shallow_diffusion is not None else self.default_shallow_diffusion
-                only_diffusion = only_diffusion if only_diffusion is not None else self.default_only_diffusion
-                cluster_infer_ratio = cluster_infer_ratio if cluster_infer_ratio is not None else self.default_cluster_infer_ratio
-                auto_predict_f0 = auto_predict_f0 if auto_predict_f0 is not None else self.default_auto_predict_f0
-                noice_scale = noice_scale if noice_scale is not None else self.default_noice_scale
-                f0_filter = f0_filter if f0_filter is not None else self.default_f0_filter
-                f0_predictor = f0_predictor or self.default_f0_predictor
-                enhancer_adaptive_key = enhancer_adaptive_key if enhancer_adaptive_key is not None else self.default_enhancer_adaptive_key
-                cr_threshold = cr_threshold if cr_threshold is not None else self.default_cr_threshold
-
-                # 检查输入文件
-                if not os.path.exists(input_wav):
-                    raise FileNotFoundError(f"输入文件不存在: {input_wav}")
-
-                # 检查服务健康状态
-                health = await self.check_health()
-                if not health:
-                    raise RuntimeError("服务未就绪")
-
-                if not health.get("model_loaded"):
-                    raise RuntimeError("模型未加载")
-
-                if health.get("queue_size", 0) >= self.max_queue_size:
-                    raise RuntimeError("服务器任务队列已满，请稍后重试")
-
-                loop = asyncio.get_event_loop()
-                success = await loop.run_in_executor(
-                    self.executor,
-                    self.convert_voice,
+                success = await self.convert_voice(
                     input_wav,
                     output_wav,
                     speaker_id,
@@ -561,8 +531,26 @@ class VoiceConverter:
                     cr_threshold,
                 )
 
-                return success
+                if not success:
+                    logger.error("语音转换失败")
+                    return False
 
+                # 验证输出文件
+                if not os.path.exists(output_wav):
+                    logger.error(f"转换后的输出文件不存在: {output_wav}")
+                    return False
+
+                output_size = os.path.getsize(output_wav)
+                if output_size == 0:
+                    logger.error("转换后的输出文件大小为0")
+                    return False
+
+                logger.info(f"异步语音转换任务完成，输出文件: {output_wav}, 大小: {output_size} 字节")
+                return True
+
+            except Exception as e:
+                logger.error(f"异步语音转换任务出错: {str(e)}")
+                return False
             finally:
                 self.current_task = None
 
@@ -594,7 +582,7 @@ class VoiceConverter:
                 logger.info(f"确保输出目录存在: {output_dir}")
             except Exception as e:
                 logger.error(f"创建输出目录失败: {str(e)}")
-                raise
+                return False
 
             # 使用默认值
             speaker_id = speaker_id or self.default_speaker
@@ -613,7 +601,7 @@ class VoiceConverter:
             # 检查输入文件
             if not os.path.exists(input_wav):
                 logger.error(f"输入文件不存在: {input_wav}")
-                raise FileNotFoundError(f"输入文件不存在: {input_wav}")
+                return False
             logger.info(f"输入文件存在，大小: {os.path.getsize(input_wav)} 字节")
 
             # 检查服务健康状态
@@ -621,15 +609,15 @@ class VoiceConverter:
             health = await self.check_health()
             if not health:
                 logger.error("服务未就绪")
-                raise RuntimeError("服务未就绪")
+                return False
 
             if not health.get("model_loaded"):
                 logger.error("模型未加载")
-                raise RuntimeError("模型未加载")
+                return False
 
             if health.get("queue_size", 0) >= self.max_queue_size:
                 logger.error("服务器任务队列已满")
-                raise RuntimeError("服务器任务队列已满，请稍后重试")
+                return False
             logger.info("服务健康状态检查通过")
 
             # 读取音频文件
@@ -639,7 +627,7 @@ class VoiceConverter:
                 logger.info(f"成功读取音频文件，大小: {len(audio_data)} 字节")
             except Exception as e:
                 logger.error(f"读取音频文件失败: {str(e)}")
-                raise
+                return False
 
             # 准备表单数据
             data = aiohttp.FormData()
@@ -679,23 +667,42 @@ class VoiceConverter:
                     ) as response:
                         logger.info(f"收到响应，状态码: {response.status}")
                         if response.status == 200:
-                            # 确保输出目录存在
-                            os.makedirs(os.path.dirname(output_wav), exist_ok=True)
-                            logger.info(f"输出目录已创建: {os.path.dirname(output_wav)}")
+                            try:
+                                # 确保输出目录存在
+                                os.makedirs(os.path.dirname(output_wav), exist_ok=True)
+                                logger.info(f"输出目录已创建: {os.path.dirname(output_wav)}")
 
-                            # 保存转换后的音频
-                            audio_content = await response.read()
-                            logger.info(f"收到音频数据，大小: {len(audio_content)} 字节")
-                            
-                            with open(output_wav, "wb") as f:
-                                f.write(audio_content)
-                            logger.info(f"音频文件已保存: {output_wav}")
+                                # 保存转换后的音频
+                                audio_content = await response.read()
+                                logger.info(f"收到音频数据，大小: {len(audio_content)} 字节")
+                                
+                                if len(audio_content) == 0:
+                                    logger.error("收到的音频数据为空")
+                                    return False
+                                
+                                with open(output_wav, "wb") as f:
+                                    f.write(audio_content)
+                                logger.info(f"音频文件已保存: {output_wav}")
 
-                            process_time = time.time() - start_time
-                            logger.info(f"转换成功！输出文件已保存为: {output_wav}")
-                            logger.info(f"输出文件大小: {os.path.getsize(output_wav)} 字节")
-                            logger.info(f"处理耗时: {process_time:.2f}秒")
-                            return True
+                                # 验证输出文件
+                                if not os.path.exists(output_wav):
+                                    logger.error(f"输出文件不存在: {output_wav}")
+                                    return False
+                                    
+                                output_size = os.path.getsize(output_wav)
+                                if output_size == 0:
+                                    logger.error("输出文件大小为0")
+                                    return False
+                                    
+                                logger.info(f"输出文件大小: {output_size} 字节")
+
+                                process_time = time.time() - start_time
+                                logger.info(f"转换成功！输出文件已保存为: {output_wav}")
+                                logger.info(f"处理耗时: {process_time:.2f}秒")
+                                return True
+                            except Exception as e:
+                                logger.error(f"保存输出文件时出错: {str(e)}")
+                                return False
                         else:
                             error_msg = await response.text()
                             logger.error(f"转换失败！状态码: {response.status}")
@@ -703,14 +710,14 @@ class VoiceConverter:
                             return False
             except asyncio.TimeoutError:
                 logger.error("转换请求超时")
-                raise
+                return False
             except Exception as e:
                 logger.error(f"发送转换请求时出错: {str(e)}")
-                raise
+                return False
 
         except Exception as e:
             logger.error(f"转换过程中发生错误: {str(e)}")
-            raise
+            return False
 
 
 @register(
