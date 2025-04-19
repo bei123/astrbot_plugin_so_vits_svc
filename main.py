@@ -10,7 +10,6 @@ from typing import Optional, Dict, List
 import os
 import time
 import uuid
-import json
 import aiohttp
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
@@ -387,28 +386,48 @@ class VoiceConverter:
             是否成功
         """
         try:
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            # 检查输入文件是否存在
+            if not os.path.exists(vocal_path):
+                logger.error(f"人声音频文件不存在: {vocal_path}")
+                return False
+
+            if not os.path.exists(inst_path):
+                logger.error(f"伴奏音频文件不存在: {inst_path}")
+                return False
+
             # 加载音频
+            logger.info(f"加载人声音频: {vocal_path}")
             vocal = self._load_audio(vocal_path)
+            logger.info(f"加载伴奏音频: {inst_path}")
             inst = self._load_audio(inst_path)
 
             # 处理人声
+            logger.info("处理人声...")
             processed_vocal = self._process_vocal(vocal)
             stereo_vocal = np.tile(processed_vocal, (2, 1))
 
             # 添加混响
+            logger.info("添加混响...")
             reverb_vocal = self._process_reverb(stereo_vocal)
 
             # 处理伴奏
+            logger.info("处理伴奏...")
             processed_inst = self._process_instrument(inst)
 
             # 混合音频
+            logger.info("混合音频...")
             min_length = min(processed_vocal.shape[1], processed_inst.shape[1])
             combined = processed_vocal[:, :min_length] + processed_inst[:, :min_length] + reverb_vocal[:, :min_length]
 
             # 母带处理
+            logger.info("母带处理...")
             final = self._process_master(combined)
 
             # 输出
+            logger.info(f"保存混合后的音频: {output_path}")
             with AudioFile(
                 output_path,
                 "w",
@@ -418,7 +437,9 @@ class VoiceConverter:
             ) as output:
                 output.write(final)
 
+            logger.info("混音处理完成")
             return True
+
         except Exception as e:
             logger.error(f"混音处理失败: {str(e)}")
             return False
@@ -533,72 +554,51 @@ class VoiceConverter:
         enhancer_adaptive_key: Optional[int] = None,
         cr_threshold: Optional[float] = None,
     ) -> bool:
-        """转换语音
-
-        Args:
-            input_wav: 输入音频文件路径
-            output_wav: 输出音频文件路径
-            speaker_id: 说话人ID，默认使用配置值
-            pitch_adjust: 音调调整，默认使用配置值
-            k_step: 扩散步数，默认使用配置值
-            shallow_diffusion: 使用浅扩散，默认使用配置值
-            only_diffusion: 使用纯扩散，默认使用配置值
-            cluster_infer_ratio: 聚类推理比例，默认使用配置值
-            auto_predict_f0: 自动预测音高，默认使用配置值
-            noice_scale: 噪声比例，默认使用配置值
-            f0_filter: 过滤F0，默认使用配置值
-            f0_predictor: F0预测器，默认使用配置值
-            enhancer_adaptive_key: 增强器自适应键，默认使用配置值
-            cr_threshold: 交叉参考阈值，默认使用配置值
-
-        Returns:
-            转换是否成功
-        """
-        # 使用默认值
-        if speaker_id is None:
-            speaker_id = self.default_speaker
-        if pitch_adjust is None:
-            pitch_adjust = self.default_pitch
-        if k_step is None:
-            k_step = self.default_k_step
-        if shallow_diffusion is None:
-            shallow_diffusion = self.default_shallow_diffusion
-        if only_diffusion is None:
-            only_diffusion = self.default_only_diffusion
-        if cluster_infer_ratio is None:
-            cluster_infer_ratio = self.default_cluster_infer_ratio
-        if auto_predict_f0 is None:
-            auto_predict_f0 = self.default_auto_predict_f0
-        if noice_scale is None:
-            noice_scale = self.default_noice_scale
-        if f0_filter is None:
-            f0_filter = self.default_f0_filter
-        if f0_predictor is None:
-            f0_predictor = self.default_f0_predictor
-        if enhancer_adaptive_key is None:
-            enhancer_adaptive_key = self.default_enhancer_adaptive_key
-        if cr_threshold is None:
-            cr_threshold = self.default_cr_threshold
-
-        # 检查服务健康状态
-        health = asyncio.run(self.check_health())
-        if not health:
-            raise RuntimeError("服务未就绪")
-
-        if not health.get("model_loaded"):
-            raise RuntimeError("模型未加载")
-
-        if health.get("queue_size", 0) >= self.max_queue_size:
-            raise RuntimeError("服务器任务队列已满，请稍后重试")
-
-        # 检查输入文件
-        if not os.path.exists(input_wav):
-            raise FileNotFoundError(f"输入文件不存在: {input_wav}")
-
+        """转换语音"""
         try:
+            # 确保临时目录存在
+            os.makedirs(os.path.dirname(output_wav), exist_ok=True)
+
+            # 使用默认值
+            speaker_id = speaker_id or self.default_speaker
+            pitch_adjust = pitch_adjust if pitch_adjust is not None else self.default_pitch
+            k_step = k_step or self.default_k_step
+            shallow_diffusion = shallow_diffusion if shallow_diffusion is not None else self.default_shallow_diffusion
+            only_diffusion = only_diffusion if only_diffusion is not None else self.default_only_diffusion
+            cluster_infer_ratio = cluster_infer_ratio if cluster_infer_ratio is not None else self.default_cluster_infer_ratio
+            auto_predict_f0 = auto_predict_f0 if auto_predict_f0 is not None else self.default_auto_predict_f0
+            noice_scale = noice_scale if noice_scale is not None else self.default_noice_scale
+            f0_filter = f0_filter if f0_filter is not None else self.default_f0_filter
+            f0_predictor = f0_predictor or self.default_f0_predictor
+            enhancer_adaptive_key = enhancer_adaptive_key if enhancer_adaptive_key is not None else self.default_enhancer_adaptive_key
+            cr_threshold = cr_threshold if cr_threshold is not None else self.default_cr_threshold
+
+            # 检查输入文件
+            if not os.path.exists(input_wav):
+                logger.error(f"输入文件不存在: {input_wav}")
+                raise FileNotFoundError(f"输入文件不存在: {input_wav}")
+
+            # 检查服务健康状态
+            health = await self.check_health()
+            if not health:
+                logger.error("服务未就绪")
+                raise RuntimeError("服务未就绪")
+
+            if not health.get("model_loaded"):
+                logger.error("模型未加载")
+                raise RuntimeError("模型未加载")
+
+            if health.get("queue_size", 0) >= self.max_queue_size:
+                logger.error("服务器任务队列已满")
+                raise RuntimeError("服务器任务队列已满，请稍后重试")
+
             # 读取音频文件
-            with open(input_wav, "rb") as f:
-                audio_data = f.read()
+            try:
+                with open(input_wav, "rb") as f:
+                    audio_data = f.read()
+            except Exception as e:
+                logger.error(f"读取音频文件失败: {str(e)}")
+                raise
 
             # 准备表单数据
             data = aiohttp.FormData()
@@ -622,52 +622,38 @@ class VoiceConverter:
 
             # 发送请求
             logger.info(f"开始转换音频: {input_wav}")
+            logger.info(f"输出文件: {output_wav}")
             logger.info(f"使用说话人ID: {speaker_id}")
             logger.info(f"音调调整: {pitch_adjust}")
-            logger.info(f"扩散步数: {k_step}")
-            logger.info(f"使用浅扩散: {shallow_diffusion}")
-            logger.info(f"使用纯扩散: {only_diffusion}")
-            logger.info(f"聚类推理比例: {cluster_infer_ratio}")
-            logger.info(f"自动预测音高: {auto_predict_f0}")
-            logger.info(f"噪声比例: {noice_scale}")
-            logger.info(f"过滤F0: {f0_filter}")
-            logger.info(f"F0预测器: {f0_predictor}")
-            logger.info(f"增强器自适应键: {enhancer_adaptive_key}")
-            logger.info(f"交叉参考阈值: {cr_threshold}")
 
             start_time = time.time()
-            async def _convert():
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{self.api_url}/wav2wav",
-                        data=data,
-                        timeout=self.timeout
-                    ) as response:
-                        if response.status == 200:
-                            with open(output_wav, "wb") as f:
-                                f.write(await response.read())
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.api_url}/wav2wav",
+                    data=data,
+                    timeout=self.timeout
+                ) as response:
+                    if response.status == 200:
+                        # 确保输出目录存在
+                        os.makedirs(os.path.dirname(output_wav), exist_ok=True)
 
-                            process_time = time.time() - start_time
-                            logger.info(f"转换成功！输出文件已保存为: {output_wav}")
-                            logger.info(f"处理耗时: {process_time:.2f}秒")
-                            return True
-                        else:
-                            try:
-                                error_msg = (await response.json()).get("error", "未知错误")
-                            except (json.JSONDecodeError, AttributeError):
-                                error_msg = f"HTTP {response.status}: {response.text}"
-                            logger.error(f"转换失败！状态码: {response.status}")
-                            logger.error(f"错误信息: {error_msg}")
-                            return False
+                        # 保存转换后的音频
+                        with open(output_wav, "wb") as f:
+                            f.write(await response.read())
 
-            return asyncio.run(_convert())
+                        process_time = time.time() - start_time
+                        logger.info(f"转换成功！输出文件已保存为: {output_wav}")
+                        logger.info(f"处理耗时: {process_time:.2f}秒")
+                        return True
+                    else:
+                        error_msg = await response.text()
+                        logger.error(f"转换失败！状态码: {response.status}")
+                        logger.error(f"错误信息: {error_msg}")
+                        return False
 
-        except asyncio.TimeoutError:
-            logger.error("请求超时")
-            return False
         except Exception as e:
-            logger.error(f"发生错误: {str(e)}")
-            return False
+            logger.error(f"转换过程中发生错误: {str(e)}")
+            raise
 
 
 @register(
