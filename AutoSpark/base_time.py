@@ -2,7 +2,7 @@ import warnings
 import librosa
 
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 class TimeCalculator:
 
@@ -11,7 +11,7 @@ class TimeCalculator:
         tempo,_ = librosa.beat.beat_track(y=y, sr=sr)
         bpm = round(int(tempo),0)
         if bpm >= 100:
-            bpm = bpm / 2      
+            bpm = bpm / 2
         self.basic_time = 60000 / bpm
         self.times = {
             "pre_delay":self.reverb_pre_delay(),
@@ -40,14 +40,14 @@ class TimeCalculator:
             if double_mode:
                 return standard_value * 2
             else:
-                return standard_value       
+                return standard_value
         else:
-            min_num = float('inf')
+            min_num = float("inf")
             for time_list in time_lists:
                 diff = abs(time_list - standard_value)
                 if diff < min_num:
                     min_num = diff
-                    closest_num = time_list           
+                    closest_num = time_list
             if double_mode:
                 return closest_num * 2
             else:

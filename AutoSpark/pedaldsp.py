@@ -5,7 +5,7 @@ from base_time import TimeCalculator
 import numpy
 
 
-'''
+"""
 Developed by: C_Zim
 Date: 25/2/26
 Version: 0.3
@@ -13,10 +13,10 @@ Description:
     此项目仅供娱乐，不得用于商业用途
     这只是个模板，请根据自己的需求进行修改
     请确保你有一定的混音知识和经验，否则只会越改越差
-'''
+"""
 
 def load(path):
-    with AudioFile(path).resampled_to(setting.sample_rate) as audio:       
+    with AudioFile(path).resampled_to(setting.sample_rate) as audio:
         data = audio.read(audio.frames)
     return data
 
@@ -44,7 +44,7 @@ def vocal(release=300,fb=180):
 
     return bv
 
-def reverb(s=5,m=25,l=50,d=200):
+def reverb(s=5,m=25,long_time=50,d=200):
     delay = Pedalboard([
         Gain(-20),
         Delay(d/8,0,1),
@@ -67,7 +67,7 @@ def reverb(s=5,m=25,l=50,d=200):
 
     long = Pedalboard([
         Gain(-12),
-        Delay(l/1000,0.6,1),
+        Delay(long_time/1000,0.6,1),
         Reverb(0.6,0.7,1,0,1,0),
         Gain(-23)
     ])
@@ -110,7 +110,7 @@ def combine(vocal,revb,inst):
 def out_put(path,audio):
      with AudioFile(
             path,
-            'w',
+            "w",
             setting.sample_rate,
             audio.shape[0],
             bit_depth= 16
@@ -124,7 +124,7 @@ ts = TimeCalculator(setting.voc_path).times
 predelay = ts["pre_delay"]
 release = ts["release"]
 
-voc = load(setting.voc_path)       
+voc = load(setting.voc_path)
 inst = load(setting.inst_path)
 
 fx_voc = vocal(release[1],release[0])

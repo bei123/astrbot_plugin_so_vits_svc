@@ -53,6 +53,12 @@
         "type": "object",
         "hint": "语音转换的相关参数设置",
         "items": {
+            "enable_mixing": {
+                "description": "是否开启混音",
+                "type": "bool",
+                "hint": "是否将转换后的人声与原伴奏混音",
+                "default": true
+            },
             "max_queue_size": {
                 "description": "最大队列大小",
                 "type": "int",

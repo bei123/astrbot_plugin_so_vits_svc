@@ -201,6 +201,7 @@ class VoiceConverter:
         self.default_f0_predictor = self.voice_config.get("default_f0_predictor", "fcpe")
         self.default_enhancer_adaptive_key = self.voice_config.get("default_enhancer_adaptive_key", 0)
         self.default_cr_threshold = self.voice_config.get("default_cr_threshold", 0.05)
+        self.enable_mixing = self.voice_config.get("enable_mixing", True)
 
         # 混音设置
         self.sample_rate = self.mixing_config.get("sample_rate", 44100)
@@ -269,14 +270,14 @@ class VoiceConverter:
         ])
         return vocal_board(audio, self.sample_rate)
 
-    def _process_reverb(self, audio: np.ndarray, s: int = 5, m: int = 25, l: int = 50, d: int = 200) -> np.ndarray:
+    def _process_reverb(self, audio: np.ndarray, s: int = 5, m: int = 25, long_time: int = 50, d: int = 200) -> np.ndarray:
         """添加混响效果
 
         Args:
             audio: 输入音频数据
             s: 短混响时间
             m: 中混响时间
-            l: 长混响时间
+            long_time: 长混响时间
             d: 延迟时间
 
         Returns:
@@ -304,7 +305,7 @@ class VoiceConverter:
 
         long = Pedalboard([
             Gain(-12),
-            Delay(l/1000, 0.6, 1),
+            Delay(long_time/1000, 0.6, 1),
             Reverb(0.6, 0.7, 1, 0, 1, 0),
             Gain(-23)
         ])
@@ -383,7 +384,7 @@ class VoiceConverter:
             # 输出
             with AudioFile(
                 output_path,
-                'w',
+                "w",
                 self.sample_rate,
                 final.shape[0],
                 bit_depth=16
@@ -1142,36 +1143,42 @@ class SoVitsSvcPlugin(Star):
                 return
 
             # 混音处理
-            yield event.plain_result("正在混音处理...")
-            try:
-                mix_success = self.converter.mix_audio(
-                    vocal_path=output_file,  # 使用转换后的人声
-                    inst_path=inst_file,     # 使用分离后的伴奏
-                    output_path=mixed_file
-                )
+            if self.converter.enable_mixing:
+                yield event.plain_result("正在混音处理...")
+                try:
+                    mix_success = self.converter.mix_audio(
+                        vocal_path=output_file,  # 使用转换后的人声
+                        inst_path=inst_file,     # 使用分离后的伴奏
+                        output_path=mixed_file
+                    )
 
-                if not mix_success:
-                    yield event.plain_result("混音处理失败！")
+                    if not mix_success:
+                        yield event.plain_result("混音处理失败！")
+                        return
+
+                except Exception as e:
+                    logger.error(f"混音处理时出错: {str(e)}")
+                    yield event.plain_result(f"混音处理时出错：{str(e)}")
                     return
 
-            except Exception as e:
-                logger.error(f"混音处理时出错: {str(e)}")
-                yield event.plain_result(f"混音处理时出错：{str(e)}")
-                return
+                # 保存到缓存
+                self.converter.cache_manager.save_cache(
+                    input_file,
+                    mixed_file,
+                    speaker_id,
+                    pitch_adjust,
+                    **cache_params
+                )
 
-            # 保存到缓存
-            self.converter.cache_manager.save_cache(
-                input_file,
-                mixed_file,
-                speaker_id,
-                pitch_adjust,
-                **cache_params
-            )
-
-            # 发送结果
-            yield event.plain_result("处理完成！正在发送文件...")
-            chain = [Record.fromFileSystem(mixed_file)]
-            yield event.chain_result(chain)
+                # 发送结果
+                yield event.plain_result("处理完成！正在发送文件...")
+                chain = [Record.fromFileSystem(mixed_file)]
+                yield event.chain_result(chain)
+            else:
+                # 如果不混音，直接发送转换后的人声
+                yield event.plain_result("处理完成！正在发送文件...")
+                chain = [Record.fromFileSystem(output_file)]
+                yield event.chain_result(chain)
 
         except Exception as e:
             logger.error(f"处理过程中发生错误: {str(e)}")
