@@ -104,11 +104,15 @@ class MSSTProcessor:
 
         for attempt in range(max_retries):
             try:
+                logger.info(f"开始处理音频文件: {input_file}")
+                logger.info(f"使用预设: {preset_name}")
+                
                 available_preset = self.find_available_preset(preset_name)
                 logger.info(f"使用预设文件: {available_preset}")
 
                 with open(input_file, "rb") as f:
                     audio_data = f.read()
+                logger.info(f"读取音频文件成功，大小: {len(audio_data)} 字节")
 
                 # 准备表单数据
                 data = aiohttp.FormData()
@@ -124,6 +128,7 @@ class MSSTProcessor:
 
                 # 发送请求
                 try:
+                    logger.info("发送MSST处理请求...")
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
                             f"{self.api_url}/infer/local",
@@ -132,7 +137,9 @@ class MSSTProcessor:
                         ) as response:
                             if response.status == 200:
                                 result = await response.json()
+                                logger.info(f"MSST处理结果: {result}")
                                 if result["status"] == "success":
+                                    logger.info("MSST处理成功")
                                     return result
                                 else:
                                     logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
@@ -175,6 +182,11 @@ class MSSTProcessor:
             是否成功
         """
         try:
+            logger.info(f"开始下载文件: {filename} -> {output_path}")
+            
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.api_url}/download/{filename}", timeout=300) as response:
                     if response.status == 200:
@@ -182,7 +194,19 @@ class MSSTProcessor:
                             async for chunk in response.content.iter_chunked(8192):
                                 if chunk:
                                     f.write(chunk)
-                        return True
+                        
+                        # 验证文件
+                        if os.path.exists(output_path):
+                            file_size = os.path.getsize(output_path)
+                            logger.info(f"文件下载成功: {output_path}, 大小: {file_size} 字节")
+                            if file_size > 0:
+                                return True
+                            else:
+                                logger.error(f"文件大小为0: {output_path}")
+                                return False
+                        else:
+                            logger.error(f"文件不存在: {output_path}")
+                            return False
                     else:
                         logger.error(f"下载文件失败: {response.status}")
                         return False
@@ -207,6 +231,11 @@ class VoiceConverter:
         self.executor = ThreadPoolExecutor(max_workers=1)  # 限制同时只能处理一个转换任务
         self.current_task = None  # 当前正在执行的任务
         self.task_lock = asyncio.Lock()  # 任务锁
+
+        # 初始化临时目录
+        self.temp_dir = os.path.join("data", "temp", "so-vits-svc")
+        os.makedirs(self.temp_dir, exist_ok=True)
+        logger.info(f"临时目录: {self.temp_dir}")
 
         # API 设置
         self.api_url = self.base_setting.get("base_url", "http://localhost:1145")
@@ -882,48 +911,48 @@ class SoVitsSvcPlugin(Star):
             3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
             4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索并转换QQ音乐
         """
-        # 解析参数
-        message = event.message_str.strip()
-        args = message.split()[1:] if message else []
-        speaker_id = None
-        pitch_adjust = None
-        song_name = None
-        source_type = "file"  # 默认为文件上传
-
-        if len(args) >= 2:
-            speaker_id = args[0]
-            try:
-                pitch_adjust = int(args[1])
-                if not -12 <= pitch_adjust <= 12:
-                    raise ValueError("音调调整必须在-12到12之间")
-            except ValueError as e:
-                yield event.plain_result(f"参数错误：{str(e)}")
-                return
-
-            if len(args) > 2:
-                # 检查是否指定了来源类型
-                if args[2].lower() == "bilibili":
-                    source_type = "bilibili"
-                    if len(args) > 3:
-                        song_name = " ".join(args[3:])
-                elif args[2].lower() == "qq":
-                    source_type = "qqmusic"
-                    if len(args) > 3:
-                        song_name = " ".join(args[3:])
-                else:
-                    song_name = " ".join(args[2:])
-
-        # 生成临时文件路径
-        input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
-        output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
-        mixed_file = os.path.join(self.temp_dir, f"mixed_{uuid.uuid4()}.wav")
-        vocal_file = os.path.join(self.temp_dir, f"vocal_{uuid.uuid4()}.wav")
-        inst_file = os.path.join(self.temp_dir, f"inst_{uuid.uuid4()}.wav")
-
-        # 生成任务ID
-        task_id = str(uuid.uuid4())
-
         try:
+            # 解析参数
+            message = event.message_str.strip()
+            args = message.split()[1:] if message else []
+            speaker_id = None
+            pitch_adjust = None
+            song_name = None
+            source_type = "file"  # 默认为文件上传
+
+            if len(args) >= 2:
+                speaker_id = args[0]
+                try:
+                    pitch_adjust = int(args[1])
+                    if not -12 <= pitch_adjust <= 12:
+                        raise ValueError("音调调整必须在-12到12之间")
+                except ValueError as e:
+                    yield event.plain_result(f"参数错误：{str(e)}")
+                    return
+
+                if len(args) > 2:
+                    # 检查是否指定了来源类型
+                    if args[2].lower() == "bilibili":
+                        source_type = "bilibili"
+                        if len(args) > 3:
+                            song_name = " ".join(args[3:])
+                    elif args[2].lower() == "qq":
+                        source_type = "qqmusic"
+                        if len(args) > 3:
+                            song_name = " ".join(args[3:])
+                    else:
+                        song_name = " ".join(args[2:])
+
+            # 生成临时文件路径
+            input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
+            output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
+            mixed_file = os.path.join(self.temp_dir, f"mixed_{uuid.uuid4()}.wav")
+            vocal_file = os.path.join(self.temp_dir, f"vocal_{uuid.uuid4()}.wav")
+            inst_file = os.path.join(self.temp_dir, f"inst_{uuid.uuid4()}.wav")
+
+            # 生成任务ID
+            task_id = str(uuid.uuid4())
+
             # 根据来源类型处理音频
             if source_type == "bilibili" and song_name:
                 try:
@@ -1151,6 +1180,28 @@ class SoVitsSvcPlugin(Star):
                 yield event.plain_result(f"下载分离文件时出错：{str(e)}")
                 return
 
+            # 检查文件
+            if not os.path.exists(vocal_file):
+                logger.error(f"人声文件不存在: {vocal_file}")
+                yield event.plain_result("人声文件不存在")
+                return
+                
+            if not os.path.exists(inst_file):
+                logger.error(f"伴奏文件不存在: {inst_file}")
+                yield event.plain_result("伴奏文件不存在")
+                return
+                
+            # 检查文件大小
+            vocal_size = os.path.getsize(vocal_file)
+            inst_size = os.path.getsize(inst_file)
+            logger.info(f"人声文件大小: {vocal_size} 字节")
+            logger.info(f"伴奏文件大小: {inst_size} 字节")
+            
+            if vocal_size == 0 or inst_size == 0:
+                logger.error("文件大小为0")
+                yield event.plain_result("文件大小为0")
+                return
+                
             # 转换人声
             yield event.plain_result("正在转换人声...")
             try:
