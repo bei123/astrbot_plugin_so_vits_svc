@@ -666,6 +666,8 @@ class VoiceConverter:
             logger.info(f"输出文件: {output_wav}")
             logger.info(f"使用说话人ID: {speaker_id}")
             logger.info(f"音调调整: {pitch_adjust}")
+            logger.info(f"API地址: {self.api_url}/wav2wav")
+            logger.info(f"超时时间: {self.timeout}秒")
 
             start_time = time.time()
             try:
@@ -675,14 +677,19 @@ class VoiceConverter:
                         data=data,
                         timeout=self.timeout
                     ) as response:
+                        logger.info(f"收到响应，状态码: {response.status}")
                         if response.status == 200:
                             # 确保输出目录存在
                             os.makedirs(os.path.dirname(output_wav), exist_ok=True)
+                            logger.info(f"输出目录已创建: {os.path.dirname(output_wav)}")
 
                             # 保存转换后的音频
                             audio_content = await response.read()
+                            logger.info(f"收到音频数据，大小: {len(audio_content)} 字节")
+                            
                             with open(output_wav, "wb") as f:
                                 f.write(audio_content)
+                            logger.info(f"音频文件已保存: {output_wav}")
 
                             process_time = time.time() - start_time
                             logger.info(f"转换成功！输出文件已保存为: {output_wav}")
