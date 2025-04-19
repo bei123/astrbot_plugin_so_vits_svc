@@ -1,0 +1,4 @@
+所需库：pedalboard,numpy
+先去把人声伴奏文件拖进input文件夹
+然后去config.py配置好文件路径
+最后运行pedaldsp.py,去output文件夹里面找成品

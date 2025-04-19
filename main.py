@@ -28,6 +28,7 @@ from .cache_manager import CacheManager
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from astrbot.api.event import filter
+import numpy
 
 class MSSTProcessor:
     """MSST 音频处理器"""
@@ -83,7 +84,7 @@ class MSSTProcessor:
 
     def process_audio(
         self, input_file: str, preset_name: str = "wav.json"
-    ) -> Optional[str]:
+    ) -> Optional[Dict[str, str]]:
         """处理音频文件
 
         Args:
@@ -91,7 +92,7 @@ class MSSTProcessor:
             preset_name: 预设文件名
 
         Returns:
-            处理后的音频文件路径，失败返回 None
+            处理后的音频文件路径字典，包含人声和伴奏文件路径，失败返回 None
         """
         try:
             available_preset = self.find_available_preset(preset_name)
@@ -104,7 +105,7 @@ class MSSTProcessor:
             data = {
                 "preset_path": available_preset,
                 "output_format": "wav",
-                "extra_output_dir": "false",
+                "extra_output_dir": "true",  # 启用额外输出目录以获取伴奏
                 "use_tta": str(self.use_tta).lower(),
                 "force_cpu": str(self.force_cpu).lower()
             }
@@ -134,23 +135,52 @@ class MSSTProcessor:
                         return None
 
                     if output_files and output_files["files"]:
-                        output_file = output_files["files"][0]
-                        download_url = f"{self.api_url}/download/{output_file['name']}"
+                        output_files = output_files["files"]
+                        vocal_file = None
+                        instrumental_file = None
                         
+                        for file_info in output_files:
+                            file_name = file_info["name"]
+                            if file_name.endswith("_Vocals.wav"):
+                                vocal_file = file_name
+                            elif file_name.endswith("_Instrumental.wav"):
+                                instrumental_file = file_name
+                        
+                        if not vocal_file or not instrumental_file:
+                            logger.error("未找到人声或伴奏文件")
+                            return None
+                            
                         # 下载处理后的文件
                         try:
-                            download_response = self.session.get(download_url)
-                            if download_response.status_code == 200:
-                                output_path = os.path.join(
-                                    os.path.dirname(input_file),
-                                    f"processed_{os.path.basename(input_file)}",
-                                )
-                                with open(output_path, "wb") as f:
-                                    f.write(download_response.content)
-                                logger.info(f"MSST处理完成，输出文件: {output_path}")
-                                return output_path
+                            output_dir = os.path.dirname(input_file)
+                            vocal_path = os.path.join(output_dir, f"processed_{os.path.basename(input_file)}")
+                            instrumental_path = os.path.join(output_dir, f"instrumental_{os.path.basename(input_file)}")
+                            
+                            # 下载人声文件
+                            vocal_url = f"{self.api_url}/download/{vocal_file}"
+                            vocal_response = self.session.get(vocal_url)
+                            if vocal_response.status_code == 200:
+                                with open(vocal_path, "wb") as f:
+                                    f.write(vocal_response.content)
                             else:
-                                logger.error(f"下载处理后的文件失败: {download_response.text}")
+                                logger.error(f"下载人声文件失败: {vocal_response.text}")
+                                return None
+                                
+                            # 下载伴奏文件
+                            instrumental_url = f"{self.api_url}/download/{instrumental_file}"
+                            instrumental_response = self.session.get(instrumental_url)
+                            if instrumental_response.status_code == 200:
+                                with open(instrumental_path, "wb") as f:
+                                    f.write(instrumental_response.content)
+                            else:
+                                logger.error(f"下载伴奏文件失败: {instrumental_response.text}")
+                                return None
+                                
+                            logger.info(f"MSST处理完成，输出文件: {vocal_path}, {instrumental_path}")
+                            return {
+                                "vocal": vocal_path,
+                                "instrumental": instrumental_path
+                            }
                         except Exception as e:
                             logger.error(f"下载处理后的文件时出错: {str(e)}")
                             return None
@@ -220,6 +250,65 @@ class VoiceConverter:
             max_cache_age=cache_config.get("max_cache_age", 7*24*60*60)  # 默认7天
         )
 
+        # 初始化AutoSpark混音处理器
+        from .AutoSpark.pedaldsp import vocal, reverb, instrument, master, load, combine, out_put
+        from .AutoSpark.config import Setting
+        from .AutoSpark.base_time import TimeCalculator
+        self.pedalboard_functions = {
+            'vocal': vocal,
+            'reverb': reverb,
+            'instrument': instrument,
+            'master': master,
+            'load': load,
+            'combine': combine,
+            'out_put': out_put
+        }
+        self.setting = Setting()
+        self.time_calculator = TimeCalculator
+
+    def mix_audio(self, vocal_path: str, inst_path: str, output_path: str) -> bool:
+        """使用AutoSpark进行混音处理
+
+        Args:
+            vocal_path: 人声文件路径
+            inst_path: 伴奏文件路径
+            output_path: 输出文件路径
+
+        Returns:
+            处理是否成功
+        """
+        try:
+            # 计算时间参数
+            ts = self.time_calculator(vocal_path).times
+            
+            # 加载音频文件
+            voc = self.pedalboard_functions['load'](vocal_path)
+            inst = self.pedalboard_functions['load'](inst_path)
+            
+            # 应用效果器
+            fx_voc = self.pedalboard_functions['vocal'](ts["release"][1], ts["release"][0])
+            fx_revb = self.pedalboard_functions['reverb'](ts["pre_delay"][0], ts["pre_delay"][2], ts["pre_delay"][3], ts["pre_delay"][1])
+            fx_inst = self.pedalboard_functions['instrument']()
+            fx_master = self.pedalboard_functions['master'](ts["release"][3], ts["release"][2])
+            
+            # 处理音频
+            eff_voc = fx_voc(voc, self.setting.sample_rate)
+            stereo = numpy.tile(eff_voc, (2, 1))
+            revb = fx_revb(stereo, self.setting.sample_rate)
+            eff_inst = fx_inst(inst, self.setting.sample_rate)
+            
+            # 混合音频
+            combined = self.pedalboard_functions['combine'](eff_voc, revb, eff_inst)
+            output = fx_master(combined, self.setting.sample_rate)
+            
+            # 输出结果
+            self.pedalboard_functions['out_put'](output_path, output)
+            return True
+            
+        except Exception as e:
+            logger.error(f"混音处理失败: {str(e)}")
+            return False
+
     def check_health(self) -> Optional[Dict]:
         """检查服务健康状态
 
@@ -249,6 +338,7 @@ class VoiceConverter:
         f0_predictor: Optional[str] = None,
         enhancer_adaptive_key: Optional[int] = None,
         cr_threshold: Optional[float] = None,
+        inst_path: Optional[str] = None,  # 新增伴奏文件路径参数
     ) -> bool:
         """异步转换语音"""
         async with self.task_lock:  # 使用锁确保同一时间只有一个任务在执行
@@ -318,6 +408,7 @@ class VoiceConverter:
                     f0_predictor,
                     enhancer_adaptive_key,
                     cr_threshold,
+                    inst_path,
                 )
 
                 # 如果转换成功，保存到缓存
@@ -351,6 +442,7 @@ class VoiceConverter:
         f0_predictor: Optional[str] = None,
         enhancer_adaptive_key: Optional[int] = None,
         cr_threshold: Optional[float] = None,
+        use_msst_inst: bool = True,  # 新增参数，是否使用MSST处理后的伴奏
     ) -> bool:
         """转换语音
 
@@ -369,6 +461,7 @@ class VoiceConverter:
             f0_predictor: F0预测器，默认使用配置值
             enhancer_adaptive_key: 增强器自适应键，默认使用配置值
             cr_threshold: 交叉参考阈值，默认使用配置值
+            use_msst_inst: 是否使用MSST处理后的伴奏
 
         Returns:
             转换是否成功
@@ -415,13 +508,13 @@ class VoiceConverter:
             raise FileNotFoundError(f"输入文件不存在: {input_wav}")
 
         # 先进行 MSST 处理
-        processed_file = self.msst_processor.process_audio(input_wav, self.msst_preset)
-        if not processed_file:
+        msst_result = self.msst_processor.process_audio(input_wav, self.msst_preset)
+        if not msst_result:
             raise RuntimeError("MSST 处理失败")
 
         try:
             # 读取处理后的音频文件
-            with open(processed_file, "rb") as f:
+            with open(msst_result["vocal"], "rb") as f:
                 audio_data = f.read()
 
             # 准备请求数据
@@ -443,7 +536,7 @@ class VoiceConverter:
             }
 
             # 发送请求
-            logger.info(f"开始转换音频: {processed_file}")
+            logger.info(f"开始转换音频: {msst_result['vocal']}")
             logger.info(f"使用说话人ID: {speaker_id}")
             logger.info(f"音调调整: {pitch_adjust}")
             logger.info(f"扩散步数: {k_step}")
@@ -464,11 +557,24 @@ class VoiceConverter:
 
             # 处理响应
             if response.status_code == 200:
-                with open(output_wav, "wb") as f:
+                # 创建临时文件存储转换后的音频
+                temp_output = os.path.join(os.path.dirname(output_wav), f"temp_{os.path.basename(output_wav)}")
+                with open(temp_output, "wb") as f:
                     f.write(response.content)
 
+                # 如果启用MSST伴奏，进行混音处理
+                if use_msst_inst:
+                    logger.info("开始混音处理...")
+                    if not self.mix_audio(temp_output, msst_result["instrumental"], output_wav):
+                        logger.error("混音处理失败，使用原始转换结果")
+                        os.rename(temp_output, output_wav)
+                    else:
+                        os.remove(temp_output)
+                else:
+                    os.rename(temp_output, output_wav)
+
                 process_time = time.time() - start_time
-                logger.info(f"转换成功！输出文件已保存为: {output_wav}")
+                logger.info(f"处理完成！输出文件已保存为: {output_wav}")
                 logger.info(f"处理耗时: {process_time:.2f}秒")
                 return True
             else:
@@ -488,8 +594,11 @@ class VoiceConverter:
             return False
         finally:
             # 清理处理后的文件
-            if processed_file and os.path.exists(processed_file):
-                os.remove(processed_file)
+            if msst_result:
+                if os.path.exists(msst_result["vocal"]):
+                    os.remove(msst_result["vocal"])
+                if os.path.exists(msst_result["instrumental"]):
+                    os.remove(msst_result["instrumental"])
 
 
 @register(
@@ -662,6 +771,7 @@ class SoVitsSvcPlugin(Star):
             2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
             3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
             4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索并转换QQ音乐
+            5. /convert_voice [说话人ID] [音调调整] mix [伴奏文件] - 转换并混音处理
         """
         # 解析参数
         message = event.message_str.strip()
@@ -670,6 +780,7 @@ class SoVitsSvcPlugin(Star):
         pitch_adjust = None
         song_name = None
         source_type = "file"  # 默认为文件上传
+        inst_path = None  # 伴奏文件路径
 
         if len(args) >= 2:
             speaker_id = args[0]
@@ -691,6 +802,13 @@ class SoVitsSvcPlugin(Star):
                     source_type = "qqmusic"
                     if len(args) > 3:
                         song_name = " ".join(args[3:])
+                elif args[2].lower() == "mix":
+                    source_type = "mix"
+                    if len(args) > 3:
+                        inst_path = args[3]
+                        if not os.path.exists(inst_path):
+                            yield event.plain_result(f"伴奏文件不存在：{inst_path}")
+                            return
                 else:
                     song_name = " ".join(args[2:])
 
@@ -706,42 +824,20 @@ class SoVitsSvcPlugin(Star):
             if source_type == "bilibili" and song_name:
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
-
-                    # 检查BBDown配置
-                    if not self.converter.bilibili_api.bbdown_path:
-                        yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
-                        return
-
-                    # 检查BBDown是否存在
-                    if not os.path.exists(self.converter.bilibili_api.bbdown_path):
-                        yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
-                        return
-
-                    # 检查BBDown是否有执行权限
-                    if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
-                        yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
-                        return
-
                     video_info = self.converter.bilibili_api.process_video(song_name)
-
                     if not video_info:
                         yield event.plain_result(f"处理视频失败：{song_name}")
                         return
-
                     yield event.plain_result(
                         f"找到视频：{video_info.get('title', '未知视频')} - {video_info.get('uploader', '未知UP主')}\n"
                         f"正在下载音频..."
                     )
-
                     downloaded_file = video_info.get("audio_file")
                     if not downloaded_file or not os.path.exists(downloaded_file):
                         yield event.plain_result("下载音频失败！")
                         return
-
-                    # 将下载的音频文件复制到输入文件路径
                     import shutil
                     shutil.copy(downloaded_file, input_file)
-
                 except Exception as e:
                     logger.error(f"处理哔哩哔哩视频时出错: {str(e)}")
                     yield event.plain_result(f"处理/下载视频时出错：{str(e)}")
@@ -749,39 +845,30 @@ class SoVitsSvcPlugin(Star):
             elif source_type == "qqmusic" and song_name:
                 try:
                     yield event.plain_result(f"正在搜索QQ音乐：{song_name}...")
-
-                    # 确保QQ音乐已登录
                     if not await self.converter.qqmusic_api.ensure_login():
                         yield event.plain_result("QQ音乐登录失败，请检查配置或重新登录")
                         return
-
                     song_info = await self.converter.qqmusic_api.get_song_with_highest_quality(song_name)
-
                     if not song_info:
                         yield event.plain_result(f"未找到QQ音乐歌曲：{song_name}")
                         return
-
                     if not song_info.get("url"):
                         yield event.plain_result("无法获取QQ音乐下载链接，可能是版权限制")
                         return
-
                     yield event.plain_result(
                         f"找到QQ音乐歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
                         f"音质：{song_info.get('level', '未知音质')}\n"
                         f"正在下载..."
                     )
-
                     downloaded_file = await self.converter.qqmusic_api.download_song(song_info, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载QQ音乐歌曲失败！")
                         return
-
                     if os.path.exists(downloaded_file):
                         os.rename(downloaded_file, input_file)
                     else:
                         yield event.plain_result("下载的QQ音乐文件不存在！")
                         return
-
                 except Exception as e:
                     logger.error(f"处理QQ音乐时出错: {str(e)}")
                     yield event.plain_result(f"搜索/下载QQ音乐歌曲时出错：{str(e)}")
@@ -789,69 +876,49 @@ class SoVitsSvcPlugin(Star):
             elif song_name:
                 try:
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
-                    song_info = (
-                        self.converter.netease_api.get_song_with_highest_quality(
-                            song_name
-                        )
-                    )
-
+                    song_info = self.converter.netease_api.get_song_with_highest_quality(song_name)
                     if not song_info:
                         yield event.plain_result(f"未找到歌曲：{song_name}")
                         return
-
                     if not song_info.get("url"):
-                        yield event.plain_result(
-                            "无法获取歌曲下载链接，可能是版权限制。"
-                        )
+                        yield event.plain_result("无法获取歌曲下载链接，可能是版权限制。")
                         return
-
                     yield event.plain_result(
                         f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
                         f"音质：{song_info.get('level', '未知音质')}\n"
                         f"大小：{song_info.get('size', '未知大小')}\n"
                         f"正在下载..."
                     )
-
-                    downloaded_file = self.converter.netease_api.download_song(
-                        song_info, self.temp_dir
-                    )
+                    downloaded_file = self.converter.netease_api.download_song(song_info, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载歌曲失败！")
                         return
-
                     if os.path.exists(downloaded_file):
                         os.rename(downloaded_file, input_file)
                     else:
                         yield event.plain_result("下载的文件不存在！")
                         return
-
                 except Exception as e:
                     logger.error(f"处理网易云音乐时出错: {str(e)}")
                     yield event.plain_result(f"搜索/下载歌曲时出错：{str(e)}")
                     return
-
-            # 否则检查是否有上传的音频文件
             else:
-                if (
-                    not hasattr(event.message_obj, "files")
-                    or not event.message_obj.files
-                ):
+                if not hasattr(event.message_obj, "files") or not event.message_obj.files:
                     yield event.plain_result(
                         "请上传要转换的音频文件或指定歌曲名！\n"
                         "用法：\n"
                         "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
                         "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
                         "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
-                        "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索QQ音乐"
+                        "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索QQ音乐\n"
+                        "5. /convert_voice [说话人ID] [音调调整] mix [伴奏文件] - 转换并混音处理"
                     )
                     return
-
                 file = event.message_obj.files[0]
                 filename = file.name if hasattr(file, "name") else str(file)
                 if not filename.lower().endswith((".wav", ".mp3")):
                     yield event.plain_result("只支持 WAV 或 MP3 格式的音频文件！")
                     return
-
                 yield event.plain_result("正在处理上传的音频文件...")
                 if hasattr(file, "url"):
                     async with aiohttp.ClientSession() as session:
@@ -875,6 +942,17 @@ class SoVitsSvcPlugin(Star):
                     output_wav=output_file,
                     speaker_id=speaker_id,
                     pitch_adjust=pitch_adjust,
+                    k_step=k_step,
+                    shallow_diffusion=shallow_diffusion,
+                    only_diffusion=only_diffusion,
+                    cluster_infer_ratio=cluster_infer_ratio,
+                    auto_predict_f0=auto_predict_f0,
+                    noice_scale=noice_scale,
+                    f0_filter=f0_filter,
+                    f0_predictor=f0_predictor,
+                    enhancer_adaptive_key=enhancer_adaptive_key,
+                    cr_threshold=cr_threshold,
+                    inst_path=inst_path,  # 添加伴奏文件路径
                 )
             )
 
@@ -890,14 +968,14 @@ class SoVitsSvcPlugin(Star):
             success = await task
 
             if success:
-                yield event.plain_result("转换成功！正在发送文件...")
+                yield event.plain_result("处理完成！正在发送文件...")
                 chain = [Record.fromFileSystem(output_file)]
                 yield event.chain_result(chain)
             else:
-                yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
+                yield event.plain_result("处理失败！请检查服务状态或参数是否正确。")
 
         except Exception as e:
-            yield event.plain_result(f"转换过程中发生错误：{str(e)}")
+            yield event.plain_result(f"处理过程中发生错误：{str(e)}")
         finally:
             # 清理任务
             if task_id in self.conversion_tasks:
