@@ -1,8 +1,23 @@
-from pedalboard import Pedalboard,Mix,Gain,HighpassFilter,PeakFilter,HighShelfFilter,Delay,Invert,Compressor,Reverb,Limiter
+import numpy as np
+import pedalboard
+from pedalboard import (
+    Compressor,
+    Gain,
+    HighpassFilter,
+    LowpassFilter,
+    Reverb,
+    Limiter,
+    NoiseGate,
+    Phaser,
+    Chorus,
+    Distortion,
+    HighShelfFilter,
+    LowShelfFilter,
+    PeakFilter,
+)
 from pedalboard.io import AudioFile
-from config import Setting
-from base_time import TimeCalculator
-import numpy
+from .config import Setting
+from .base_time import TimeCalculator
 
 
 '''
@@ -21,7 +36,7 @@ def load(path):
     return data
 
 def vocal(release=300,fb=180):
-    bv = Pedalboard([
+    bv = pedalboard.Pedalboard([
         Gain(setting.voc_input),
         HighpassFilter(230),
         PeakFilter(2700,-2,1),
@@ -30,10 +45,10 @@ def vocal(release=300,fb=180):
         PeakFilter(1400,3,1.15),
         PeakFilter(8500,2.5,1),
         Gain(-1),
-        Mix([
+        pedalboard.Mix([
             Gain(0),
-            Pedalboard([
-                Invert(),
+            pedalboard.Pedalboard([
+                pedalboard.Invert(),
                 Compressor(-30,3.2,40,fb),
                 Gain(-40)
             ])
@@ -45,35 +60,35 @@ def vocal(release=300,fb=180):
     return bv
 
 def reverb(s=5,m=25,l=50,d=200):
-    delay = Pedalboard([
+    delay = pedalboard.Pedalboard([
         Gain(-20),
-        Delay(d/8,0,1),
+        pedalboard.Delay(d/8,0,1),
         Gain(-12),
     ])
 
-    short = Pedalboard([
+    short = pedalboard.Pedalboard([
         Gain(-20),
-        Delay(s/1000,0,1),
+        pedalboard.Delay(s/1000,0,1),
         Reverb(0.2,0.35,1,0,1,0),
         Gain(-12),
     ])
 
-    medium = Pedalboard([
+    medium = pedalboard.Pedalboard([
         Gain(-16),
-        Delay(m/1000,0.3,1),
+        pedalboard.Delay(m/1000,0.3,1),
         Reverb(0.45,0.55,1,0,1,0),
         Gain(-19),
     ])
 
-    long = Pedalboard([
+    long = pedalboard.Pedalboard([
         Gain(-12),
-        Delay(l/1000,0.6,1),
+        pedalboard.Delay(l/1000,0.6,1),
         Reverb(0.6,0.7,1,0,1,0),
         Gain(-23)
     ])
 
-    br = Pedalboard([
-        Mix([
+    br = pedalboard.Pedalboard([
+        pedalboard.Mix([
             short,
             medium,
             long,
@@ -87,11 +102,11 @@ def reverb(s=5,m=25,l=50,d=200):
     return br
 
 def instrument():
-    inst = Pedalboard([Gain(setting.headroom)])
+    inst = pedalboard.Pedalboard([Gain(setting.headroom)])
     return inst
 
 def master(comp_rel=500,lim_rel=400):
-    mast = Pedalboard([
+    mast = pedalboard.Pedalboard([
         Compressor(-10,1.6,10,comp_rel),
         Limiter(-3,lim_rel),
         Gain(-0.5)
@@ -132,7 +147,7 @@ fx_revb = reverb(predelay[0],predelay[2],predelay[3],predelay[1])
 fx_inst = instrument()
 fx_master = master(release[3],release[2])
 eff_voc = fx_voc(voc,setting.sample_rate)
-stereo = numpy.tile(eff_voc,(2, 1))
+stereo = np.tile(eff_voc,(2, 1))
 
 revb = fx_revb(stereo,setting.sample_rate)
 eff_inst = fx_inst(inst,setting.sample_rate)
