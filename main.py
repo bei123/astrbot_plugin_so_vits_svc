@@ -447,33 +447,20 @@ class VoiceConverter:
                 enhancer_adaptive_key = enhancer_adaptive_key if enhancer_adaptive_key is not None else self.default_enhancer_adaptive_key
                 cr_threshold = cr_threshold if cr_threshold is not None else self.default_cr_threshold
 
-                # 检查缓存
-                cache_params = {
-                    "k_step": k_step,
-                    "shallow_diffusion": shallow_diffusion,
-                    "only_diffusion": only_diffusion,
-                    "cluster_infer_ratio": cluster_infer_ratio,
-                    "auto_predict_f0": auto_predict_f0,
-                    "noice_scale": noice_scale,
-                    "f0_filter": f0_filter,
-                    "f0_predictor": f0_predictor,
-                    "enhancer_adaptive_key": enhancer_adaptive_key,
-                    "cr_threshold": cr_threshold
-                }
+                # 检查输入文件
+                if not os.path.exists(input_wav):
+                    raise FileNotFoundError(f"输入文件不存在: {input_wav}")
 
-                cached_file = self.cache_manager.get_cache(
-                    input_wav,
-                    speaker_id,
-                    pitch_adjust,
-                    **cache_params
-                )
+                # 检查服务健康状态
+                health = self.check_health()
+                if not health:
+                    raise RuntimeError("服务未就绪")
 
-                if cached_file:
-                    logger.info(f"使用缓存: {cached_file}")
-                    # 复制缓存文件到输出路径
-                    import shutil
-                    shutil.copy2(cached_file, output_wav)
-                    return True
+                if not health.get("model_loaded"):
+                    raise RuntimeError("模型未加载")
+
+                if health.get("queue_size", 0) >= self.max_queue_size:
+                    raise RuntimeError("服务器任务队列已满，请稍后重试")
 
                 loop = asyncio.get_event_loop()
                 success = await loop.run_in_executor(
@@ -494,16 +481,6 @@ class VoiceConverter:
                     enhancer_adaptive_key,
                     cr_threshold,
                 )
-
-                # 如果转换成功，保存到缓存
-                if success:
-                    self.cache_manager.save_cache(
-                        input_wav,
-                        output_wav,
-                        speaker_id,
-                        pitch_adjust,
-                        **cache_params
-                    )
 
                 return success
 
@@ -1141,12 +1118,18 @@ class SoVitsSvcPlugin(Star):
             # 转换人声
             yield event.plain_result("正在转换人声...")
             try:
-                convert_success = await self.converter.convert_voice_async(
-                    input_wav=vocal_file,
-                    output_wav=output_file,
-                    speaker_id=speaker_id,
-                    pitch_adjust=pitch_adjust,
+                # 创建异步任务
+                convert_task = asyncio.create_task(
+                    self.converter.convert_voice_async(
+                        input_wav=vocal_file,  # 使用分离后的人声
+                        output_wav=output_file,
+                        speaker_id=speaker_id,
+                        pitch_adjust=pitch_adjust,
+                    )
                 )
+
+                # 等待转换完成
+                convert_success = await convert_task
 
                 if not convert_success:
                     yield event.plain_result("人声转换失败！")
@@ -1161,8 +1144,8 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result("正在混音处理...")
             try:
                 mix_success = self.converter.mix_audio(
-                    vocal_path=output_file,
-                    inst_path=inst_file,
+                    vocal_path=output_file,  # 使用转换后的人声
+                    inst_path=inst_file,     # 使用分离后的伴奏
                     output_path=mixed_file
                 )
 
