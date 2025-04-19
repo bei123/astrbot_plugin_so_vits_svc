@@ -566,14 +566,9 @@ class VoiceConverter:
         if not os.path.exists(input_wav):
             raise FileNotFoundError(f"输入文件不存在: {input_wav}")
 
-        # 先进行 MSST 处理
-        processed_file = self.msst_processor.process_audio(input_wav, self.msst_preset)
-        if not processed_file:
-            raise RuntimeError("MSST 处理失败")
-
         try:
-            # 读取处理后的音频文件
-            with open(processed_file, "rb") as f:
+            # 读取音频文件
+            with open(input_wav, "rb") as f:
                 audio_data = f.read()
 
             # 准备请求数据
@@ -595,7 +590,7 @@ class VoiceConverter:
             }
 
             # 发送请求
-            logger.info(f"开始转换音频: {processed_file}")
+            logger.info(f"开始转换音频: {input_wav}")
             logger.info(f"使用说话人ID: {speaker_id}")
             logger.info(f"音调调整: {pitch_adjust}")
             logger.info(f"扩散步数: {k_step}")
@@ -638,10 +633,6 @@ class VoiceConverter:
         except Exception as e:
             logger.error(f"发生错误: {str(e)}")
             return False
-        finally:
-            # 清理处理后的文件
-            if processed_file and os.path.exists(processed_file):
-                os.remove(processed_file)
 
 
 @register(
@@ -1125,6 +1116,16 @@ class SoVitsSvcPlugin(Star):
                         output_wav=output_file,
                         speaker_id=speaker_id,
                         pitch_adjust=pitch_adjust,
+                        k_step=self.converter.default_k_step,
+                        shallow_diffusion=self.converter.default_shallow_diffusion,
+                        only_diffusion=self.converter.default_only_diffusion,
+                        cluster_infer_ratio=self.converter.default_cluster_infer_ratio,
+                        auto_predict_f0=self.converter.default_auto_predict_f0,
+                        noice_scale=self.converter.default_noice_scale,
+                        f0_filter=self.converter.default_f0_filter,
+                        f0_predictor=self.converter.default_f0_predictor,
+                        enhancer_adaptive_key=self.converter.default_enhancer_adaptive_key,
+                        cr_threshold=self.converter.default_cr_threshold
                     )
                 )
 
