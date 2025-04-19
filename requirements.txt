@@ -3,3 +3,4 @@ httpx>=0.24.0
 anyio>=3.7.1 
 pedalboard
 numpy
+librosa

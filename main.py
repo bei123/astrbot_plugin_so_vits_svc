@@ -278,33 +278,9 @@ class VoiceConverter:
             处理是否成功
         """
         try:
-            # 计算时间参数
-            ts = self.time_calculator(vocal_path).times
-            
-            # 加载音频文件
-            voc = self.pedalboard_functions['load'](vocal_path)
-            inst = self.pedalboard_functions['load'](inst_path)
-            
-            # 应用效果器
-            fx_voc = self.pedalboard_functions['vocal'](ts["release"][1], ts["release"][0])
-            fx_revb = self.pedalboard_functions['reverb'](ts["pre_delay"][0], ts["pre_delay"][2], ts["pre_delay"][3], ts["pre_delay"][1])
-            fx_inst = self.pedalboard_functions['instrument']()
-            fx_master = self.pedalboard_functions['master'](ts["release"][3], ts["release"][2])
-            
-            # 处理音频
-            eff_voc = fx_voc(voc, self.setting.sample_rate)
-            stereo = numpy.tile(eff_voc, (2, 1))
-            revb = fx_revb(stereo, self.setting.sample_rate)
-            eff_inst = fx_inst(inst, self.setting.sample_rate)
-            
-            # 混合音频
-            combined = self.pedalboard_functions['combine'](eff_voc, revb, eff_inst)
-            output = fx_master(combined, self.setting.sample_rate)
-            
-            # 输出结果
-            self.pedalboard_functions['out_put'](output_path, output)
+            from .AutoSpark.pedaldsp import process_audio
+            process_audio(vocal_path, inst_path, output_path)
             return True
-            
         except Exception as e:
             logger.error(f"混音处理失败: {str(e)}")
             return False

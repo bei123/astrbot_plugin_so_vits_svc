@@ -132,25 +132,43 @@ def out_put(path,audio):
         ) as final:
             final.write(audio)
 
+def process_audio(vocal_path, inst_path, output_path):
+    """处理音频文件
 
+    Args:
+        vocal_path: 人声文件路径
+        inst_path: 伴奏文件路径
+        output_path: 输出文件路径
+    """
+    global setting
+    setting = Setting()
+    setting.voc_path = vocal_path
+    setting.inst_path = inst_path
 
-setting = Setting()
-ts = TimeCalculator(setting.voc_path).times
-predelay = ts["pre_delay"]
-release = ts["release"]
+    # 计算时间参数
+    ts = TimeCalculator(inst_path).times
+    predelay = ts["pre_delay"]
+    release = ts["release"]
 
-voc = load(setting.voc_path)       
-inst = load(setting.inst_path)
+    # 加载音频文件
+    voc = load(vocal_path)       
+    inst = load(inst_path)
 
-fx_voc = vocal(release[1],release[0])
-fx_revb = reverb(predelay[0],predelay[2],predelay[3],predelay[1])
-fx_inst = instrument()
-fx_master = master(release[3],release[2])
-eff_voc = fx_voc(voc,setting.sample_rate)
-stereo = np.tile(eff_voc,(2, 1))
+    # 应用效果器
+    fx_voc = vocal(release[1],release[0])
+    fx_revb = reverb(predelay[0],predelay[2],predelay[3],predelay[1])
+    fx_inst = instrument()
+    fx_master = master(release[3],release[2])
 
-revb = fx_revb(stereo,setting.sample_rate)
-eff_inst = fx_inst(inst,setting.sample_rate)
-combined = combine(eff_voc,revb,eff_inst)
-output = fx_master(combined,setting.sample_rate)
-out_put("output/mixdown.flac",output)
+    # 处理音频
+    eff_voc = fx_voc(voc,setting.sample_rate)
+    stereo = np.tile(eff_voc,(2, 1))
+    revb = fx_revb(stereo,setting.sample_rate)
+    eff_inst = fx_inst(inst,setting.sample_rate)
+
+    # 混合音频
+    combined = combine(eff_voc,revb,eff_inst)
+    output = fx_master(combined,setting.sample_rate)
+
+    # 输出结果
+    out_put(output_path,output)
