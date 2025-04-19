@@ -1,23 +1,8 @@
-import numpy as np
-import pedalboard
-from pedalboard import (
-    Compressor,
-    Gain,
-    HighpassFilter,
-    LowpassFilter,
-    Reverb,
-    Limiter,
-    NoiseGate,
-    Phaser,
-    Chorus,
-    Distortion,
-    HighShelfFilter,
-    LowShelfFilter,
-    PeakFilter,
-)
+from pedalboard import Pedalboard,Mix,Gain,HighpassFilter,PeakFilter,HighShelfFilter,Delay,Invert,Compressor,Reverb,Limiter
 from pedalboard.io import AudioFile
-from .config import Setting
-from .base_time import TimeCalculator
+from config import Setting
+from base_time import TimeCalculator
+import numpy
 
 
 '''
@@ -36,7 +21,7 @@ def load(path):
     return data
 
 def vocal(release=300,fb=180):
-    bv = pedalboard.Pedalboard([
+    bv = Pedalboard([
         Gain(setting.voc_input),
         HighpassFilter(230),
         PeakFilter(2700,-2,1),
@@ -45,10 +30,10 @@ def vocal(release=300,fb=180):
         PeakFilter(1400,3,1.15),
         PeakFilter(8500,2.5,1),
         Gain(-1),
-        pedalboard.Mix([
+        Mix([
             Gain(0),
-            pedalboard.Pedalboard([
-                pedalboard.Invert(),
+            Pedalboard([
+                Invert(),
                 Compressor(-30,3.2,40,fb),
                 Gain(-40)
             ])
@@ -60,35 +45,35 @@ def vocal(release=300,fb=180):
     return bv
 
 def reverb(s=5,m=25,l=50,d=200):
-    delay = pedalboard.Pedalboard([
+    delay = Pedalboard([
         Gain(-20),
-        pedalboard.Delay(d/8,0,1),
+        Delay(d/8,0,1),
         Gain(-12),
     ])
 
-    short = pedalboard.Pedalboard([
+    short = Pedalboard([
         Gain(-20),
-        pedalboard.Delay(s/1000,0,1),
+        Delay(s/1000,0,1),
         Reverb(0.2,0.35,1,0,1,0),
         Gain(-12),
     ])
 
-    medium = pedalboard.Pedalboard([
+    medium = Pedalboard([
         Gain(-16),
-        pedalboard.Delay(m/1000,0.3,1),
+        Delay(m/1000,0.3,1),
         Reverb(0.45,0.55,1,0,1,0),
         Gain(-19),
     ])
 
-    long = pedalboard.Pedalboard([
+    long = Pedalboard([
         Gain(-12),
-        pedalboard.Delay(l/1000,0.6,1),
+        Delay(l/1000,0.6,1),
         Reverb(0.6,0.7,1,0,1,0),
         Gain(-23)
     ])
 
-    br = pedalboard.Pedalboard([
-        pedalboard.Mix([
+    br = Pedalboard([
+        Mix([
             short,
             medium,
             long,
@@ -102,11 +87,11 @@ def reverb(s=5,m=25,l=50,d=200):
     return br
 
 def instrument():
-    inst = pedalboard.Pedalboard([Gain(setting.headroom)])
+    inst = Pedalboard([Gain(setting.headroom)])
     return inst
 
 def master(comp_rel=500,lim_rel=400):
-    mast = pedalboard.Pedalboard([
+    mast = Pedalboard([
         Compressor(-10,1.6,10,comp_rel),
         Limiter(-3,lim_rel),
         Gain(-0.5)
@@ -132,43 +117,25 @@ def out_put(path,audio):
         ) as final:
             final.write(audio)
 
-def process_audio(vocal_path, inst_path, output_path):
-    """处理音频文件
 
-    Args:
-        vocal_path: 人声文件路径
-        inst_path: 伴奏文件路径
-        output_path: 输出文件路径
-    """
-    global setting
-    setting = Setting()
-    setting.voc_path = vocal_path
-    setting.inst_path = inst_path
 
-    # 计算时间参数
-    ts = TimeCalculator(inst_path).times
-    predelay = ts["pre_delay"]
-    release = ts["release"]
+setting = Setting()
+ts = TimeCalculator(setting.voc_path).times
+predelay = ts["pre_delay"]
+release = ts["release"]
 
-    # 加载音频文件
-    voc = load(vocal_path)       
-    inst = load(inst_path)
+voc = load(setting.voc_path)       
+inst = load(setting.inst_path)
 
-    # 应用效果器
-    fx_voc = vocal(release[1],release[0])
-    fx_revb = reverb(predelay[0],predelay[2],predelay[3],predelay[1])
-    fx_inst = instrument()
-    fx_master = master(release[3],release[2])
+fx_voc = vocal(release[1],release[0])
+fx_revb = reverb(predelay[0],predelay[2],predelay[3],predelay[1])
+fx_inst = instrument()
+fx_master = master(release[3],release[2])
+eff_voc = fx_voc(voc,setting.sample_rate)
+stereo = numpy.tile(eff_voc,(2, 1))
 
-    # 处理音频
-    eff_voc = fx_voc(voc,setting.sample_rate)
-    stereo = np.tile(eff_voc,(2, 1))
-    revb = fx_revb(stereo,setting.sample_rate)
-    eff_inst = fx_inst(inst,setting.sample_rate)
-
-    # 混合音频
-    combined = combine(eff_voc,revb,eff_inst)
-    output = fx_master(combined,setting.sample_rate)
-
-    # 输出结果
-    out_put(output_path,output)
+revb = fx_revb(stereo,setting.sample_rate)
+eff_inst = fx_inst(inst,setting.sample_rate)
+combined = combine(eff_voc,revb,eff_inst)
+output = fx_master(combined,setting.sample_rate)
+out_put("output/mixdown.flac",output)
