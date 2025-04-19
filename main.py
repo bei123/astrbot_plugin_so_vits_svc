@@ -115,7 +115,7 @@ class MSSTProcessor:
             # 发送请求
             try:
                 response = self.session.post(
-                    f"{self.api_url}/infer/local", files=files, data=data, timeout=300
+                    f"{self.api_url}/infer/local", files=files, data=data, timeout=3000
                 )
             except requests.Timeout:
                 logger.error("MSST处理请求超时")
