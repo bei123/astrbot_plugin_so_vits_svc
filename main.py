@@ -669,9 +669,11 @@ class SoVitsSvcPlugin(Star):
         """
         super().__init__(context)
         self.config = config
-        self._init_config()
+        self.converter = VoiceConverter(self.config)  # 立即初始化 converter
         self.conversion_tasks = {}  # 存储正在进行的转换任务
         self.msst_processor = None  # 延迟初始化 MSST 处理器
+        self.temp_dir = "data/temp/so-vits-svc"
+        os.makedirs(self.temp_dir, exist_ok=True)
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -811,10 +813,6 @@ class SoVitsSvcPlugin(Star):
 
     async def _init_config(self) -> None:
         """初始化配置"""
-        self.converter = VoiceConverter(self.config)
-        self.temp_dir = "data/temp/so-vits-svc"
-        os.makedirs(self.temp_dir, exist_ok=True)
-
         # 初始化 MSST 处理器
         self.msst_processor = MSSTProcessor(self.config.get("base_setting", {}).get("msst_url", "http://localhost:9000"))
         await self.msst_processor.initialize()
