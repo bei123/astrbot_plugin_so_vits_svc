@@ -86,7 +86,7 @@ class MSSTProcessor:
 
     def process_audio(
         self, input_file: str, preset_name: str = "wav.json"
-    ) -> Optional[str]:
+    ) -> Optional[Dict]:
         """处理音频文件
 
         Args:
@@ -94,7 +94,7 @@ class MSSTProcessor:
             preset_name: 预设文件名
 
         Returns:
-            处理后的音频文件路径，失败返回 None
+            处理结果字典，失败返回 None
         """
         try:
             available_preset = self.find_available_preset(preset_name)
@@ -127,38 +127,7 @@ class MSSTProcessor:
             if response.status_code == 200:
                 result = response.json()
                 if result["status"] == "success":
-                    # 获取输出文件列表
-                    try:
-                        output_files = self.session.get(
-                            f"{self.api_url}/list_outputs"
-                        ).json()
-                    except Exception as e:
-                        logger.error(f"获取输出文件列表失败: {str(e)}")
-                        return None
-
-                    if output_files and output_files["files"]:
-                        output_file = output_files["files"][0]
-                        download_url = f"{self.api_url}/download/{output_file['name']}"
-                        
-                        # 下载处理后的文件
-                        try:
-                            download_response = self.session.get(download_url)
-                            if download_response.status_code == 200:
-                                output_path = os.path.join(
-                                    os.path.dirname(input_file),
-                                    f"processed_{os.path.basename(input_file)}",
-                                )
-                                with open(output_path, "wb") as f:
-                                    f.write(download_response.content)
-                                logger.info(f"MSST处理完成，输出文件: {output_path}")
-                                return output_path
-                            else:
-                                logger.error(f"下载处理后的文件失败: {download_response.text}")
-                        except Exception as e:
-                            logger.error(f"下载处理后的文件时出错: {str(e)}")
-                            return None
-                    else:
-                        logger.error("未找到处理后的输出文件")
+                    return result
                 else:
                     logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
             else:
@@ -182,7 +151,7 @@ class MSSTProcessor:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.api_url}/download/{filename}") as response:
+                async with session.get(f"{self.api_url}/download/{filename}", timeout=300) as response:
                     if response.status == 200:
                         with open(output_path, "wb") as f:
                             f.write(await response.read())
@@ -1129,7 +1098,7 @@ class SoVitsSvcPlugin(Star):
             success = await task
 
             if success:
-                yield event.plain_result("转换成功！正在处理混音...")
+                yield event.plain_result("正在使用MSST分离人声和伴奏...")
 
                 # 使用MSST分离人声和伴奏
                 msst_result = self.converter.msst_processor.process_audio(
@@ -1141,27 +1110,40 @@ class SoVitsSvcPlugin(Star):
                     yield event.plain_result("MSST处理失败！")
                     return
 
+                # 检查MSST处理结果
+                if msst_result.get("status") != "success":
+                    yield event.plain_result(f"MSST处理失败：{msst_result.get('message', '未知错误')}")
+                    return
+
                 # 下载分离后的人声和伴奏文件
                 vocal_file = os.path.join(self.temp_dir, "input_vocals_noreverb.wav")
                 inst_file = os.path.join(self.temp_dir, "input_instrumental.wav")
 
                 # 异步下载文件
-                vocal_download = await self.converter.msst_processor.download_file(
-                    "input_vocals_noreverb.wav",
-                    vocal_file
-                )
-                inst_download = await self.converter.msst_processor.download_file(
-                    "input_instrumental.wav",
-                    inst_file
-                )
+                try:
+                    vocal_download = await self.converter.msst_processor.download_file(
+                        "input_vocals_noreverb.wav",
+                        vocal_file
+                    )
+                    inst_download = await self.converter.msst_processor.download_file(
+                        "input_instrumental.wav",
+                        inst_file
+                    )
 
-                if not vocal_download or not inst_download:
-                    yield event.plain_result("下载分离后的音频文件失败！")
+                    if not vocal_download or not inst_download:
+                        yield event.plain_result("下载分离后的音频文件失败！")
+                        return
+
+                    if not os.path.exists(vocal_file) or not os.path.exists(inst_file):
+                        yield event.plain_result("未能成功获取分离后的音频文件！")
+                        return
+
+                except Exception as e:
+                    logger.error(f"下载分离文件时出错: {str(e)}")
+                    yield event.plain_result(f"下载分离文件时出错：{str(e)}")
                     return
 
-                if not os.path.exists(vocal_file) or not os.path.exists(inst_file):
-                    yield event.plain_result("未能成功获取分离后的音频文件！")
-                    return
+                yield event.plain_result("正在转换人声...")
 
                 # 使用分离后的人声进行转换
                 convert_task = asyncio.create_task(
@@ -1174,21 +1156,34 @@ class SoVitsSvcPlugin(Star):
                 )
 
                 # 等待转换完成
-                convert_success = await convert_task
+                try:
+                    convert_success = await convert_task
+                except Exception as e:
+                    logger.error(f"人声转换时出错: {str(e)}")
+                    yield event.plain_result(f"人声转换时出错：{str(e)}")
+                    return
 
                 if not convert_success:
                     yield event.plain_result("人声转换失败！")
                     return
 
-                # 混音处理
-                mix_success = self.converter.mix_audio(
-                    vocal_path=output_file,  # 使用转换后的人声
-                    inst_path=inst_file,     # 使用分离后的伴奏
-                    output_path=mixed_file
-                )
+                yield event.plain_result("正在混音处理...")
 
-                if not mix_success:
-                    yield event.plain_result("混音处理失败！")
+                # 混音处理
+                try:
+                    mix_success = self.converter.mix_audio(
+                        vocal_path=output_file,  # 使用转换后的人声
+                        inst_path=inst_file,     # 使用分离后的伴奏
+                        output_path=mixed_file
+                    )
+
+                    if not mix_success:
+                        yield event.plain_result("混音处理失败！")
+                        return
+
+                except Exception as e:
+                    logger.error(f"混音处理时出错: {str(e)}")
+                    yield event.plain_result(f"混音处理时出错：{str(e)}")
                     return
 
                 yield event.plain_result("处理完成！正在发送文件...")
@@ -1205,12 +1200,9 @@ class SoVitsSvcPlugin(Star):
                 del self.conversion_tasks[task_id]
             # 清理临时文件
             try:
-                if os.path.exists(input_file):
-                    os.remove(input_file)
-                if os.path.exists(output_file):
-                    os.remove(output_file)
-                if os.path.exists(mixed_file):
-                    os.remove(mixed_file)
+                for file_path in [input_file, output_file, mixed_file, vocal_file, inst_file]:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
             except (OSError, IOError) as e:
                 logger.error(f"清理临时文件失败: {str(e)}")
 
