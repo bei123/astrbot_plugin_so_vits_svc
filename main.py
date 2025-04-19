@@ -42,10 +42,14 @@ class MSSTProcessor:
         """
         self.api_url = api_url
         self.session = None
-        self.available_presets = self.get_presets()
+        self.available_presets = []
         self.batch_size = None  # 将由get_optimal_batch_size自动设置
         self.use_tta = False
         self.force_cpu = False
+
+    async def initialize(self):
+        """初始化处理器，获取预设列表"""
+        self.available_presets = await self.get_presets()
 
     async def get_presets(self) -> List[str]:
         """获取可用的预设列表
@@ -158,7 +162,9 @@ class MSSTProcessor:
                 async with session.get(f"{self.api_url}/download/{filename}", timeout=300) as response:
                     if response.status == 200:
                         with open(output_path, "wb") as f:
-                            f.write(await response.read())
+                            async for chunk in response.content.iter_chunked(8192):
+                                if chunk:
+                                    f.write(chunk)
                         return True
                     else:
                         logger.error(f"下载文件失败: {response.status}")
@@ -665,6 +671,7 @@ class SoVitsSvcPlugin(Star):
         self.config = config
         self._init_config()
         self.conversion_tasks = {}  # 存储正在进行的转换任务
+        self.msst_processor = None  # 延迟初始化 MSST 处理器
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -802,11 +809,15 @@ class SoVitsSvcPlugin(Star):
             }
         }
 
-    def _init_config(self) -> None:
+    async def _init_config(self) -> None:
         """初始化配置"""
         self.converter = VoiceConverter(self.config)
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
+
+        # 初始化 MSST 处理器
+        self.msst_processor = MSSTProcessor(self.config.get("base_setting", {}).get("msst_url", "http://localhost:9000"))
+        await self.msst_processor.initialize()
 
     @command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
