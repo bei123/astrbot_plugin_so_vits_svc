@@ -41,6 +41,9 @@ class MSSTProcessor:
         self.api_url = api_url
         self.session = requests.Session()
         self.available_presets = self.get_presets()
+        self.batch_size = None  # 将由get_optimal_batch_size自动设置
+        self.use_tta = False
+        self.force_cpu = False
 
     def get_presets(self) -> List[str]:
         """获取可用的预设列表
@@ -102,37 +105,66 @@ class MSSTProcessor:
                 "preset_path": available_preset,
                 "output_format": "wav",
                 "extra_output_dir": "false",
+                "use_tta": str(self.use_tta).lower(),
+                "force_cpu": str(self.force_cpu).lower()
             }
 
-            response = self.session.post(
-                f"{self.api_url}/infer/local", files=files, data=data
-            )
+            # 发送请求
+            try:
+                response = self.session.post(
+                    f"{self.api_url}/infer/local", files=files, data=data, timeout=300
+                )
+            except requests.Timeout:
+                logger.error("MSST处理请求超时")
+                return None
+            except requests.RequestException as e:
+                logger.error(f"MSST处理请求失败: {str(e)}")
+                return None
 
             if response.status_code == 200:
                 result = response.json()
                 if result["status"] == "success":
-                    output_files = self.session.get(
-                        f"{self.api_url}/list_outputs"
-                    ).json()
+                    # 获取输出文件列表
+                    try:
+                        output_files = self.session.get(
+                            f"{self.api_url}/list_outputs"
+                        ).json()
+                    except Exception as e:
+                        logger.error(f"获取输出文件列表失败: {str(e)}")
+                        return None
+
                     if output_files and output_files["files"]:
                         output_file = output_files["files"][0]
                         download_url = f"{self.api_url}/download/{output_file['name']}"
-                        download_response = self.session.get(download_url)
+                        
+                        # 下载处理后的文件
+                        try:
+                            download_response = self.session.get(download_url)
+                            if download_response.status_code == 200:
+                                output_path = os.path.join(
+                                    os.path.dirname(input_file),
+                                    f"processed_{os.path.basename(input_file)}",
+                                )
+                                with open(output_path, "wb") as f:
+                                    f.write(download_response.content)
+                                logger.info(f"MSST处理完成，输出文件: {output_path}")
+                                return output_path
+                            else:
+                                logger.error(f"下载处理后的文件失败: {download_response.text}")
+                        except Exception as e:
+                            logger.error(f"下载处理后的文件时出错: {str(e)}")
+                            return None
+                    else:
+                        logger.error("未找到处理后的输出文件")
+                else:
+                    logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
+            else:
+                logger.error(f"MSST处理失败: {response.text}")
 
-                        if download_response.status_code == 200:
-                            output_path = os.path.join(
-                                os.path.dirname(input_file),
-                                f"processed_{os.path.basename(input_file)}",
-                            )
-                            with open(output_path, "wb") as f:
-                                f.write(download_response.content)
-                            return output_path
-
-            logger.error(f"MSST 处理失败: {response.text}")
             return None
 
         except Exception as e:
-            logger.error(f"MSST 处理出错: {str(e)}")
+            logger.error(f"MSST处理出错: {str(e)}")
             return None
 
 
