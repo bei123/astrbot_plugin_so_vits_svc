@@ -556,8 +556,16 @@ class VoiceConverter:
     ) -> bool:
         """转换语音"""
         try:
+            logger.info(f"开始语音转换流程，输入文件: {input_wav}, 输出文件: {output_wav}")
+            
             # 确保临时目录存在
-            os.makedirs(os.path.dirname(output_wav), exist_ok=True)
+            output_dir = os.path.dirname(output_wav)
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                logger.info(f"确保输出目录存在: {output_dir}")
+            except Exception as e:
+                logger.error(f"创建输出目录失败: {str(e)}")
+                raise
 
             # 使用默认值
             speaker_id = speaker_id or self.default_speaker
@@ -577,8 +585,10 @@ class VoiceConverter:
             if not os.path.exists(input_wav):
                 logger.error(f"输入文件不存在: {input_wav}")
                 raise FileNotFoundError(f"输入文件不存在: {input_wav}")
+            logger.info(f"输入文件存在，大小: {os.path.getsize(input_wav)} 字节")
 
             # 检查服务健康状态
+            logger.info("检查服务健康状态...")
             health = await self.check_health()
             if not health:
                 logger.error("服务未就绪")
@@ -591,11 +601,13 @@ class VoiceConverter:
             if health.get("queue_size", 0) >= self.max_queue_size:
                 logger.error("服务器任务队列已满")
                 raise RuntimeError("服务器任务队列已满，请稍后重试")
+            logger.info("服务健康状态检查通过")
 
             # 读取音频文件
             try:
                 with open(input_wav, "rb") as f:
                     audio_data = f.read()
+                logger.info(f"成功读取音频文件，大小: {len(audio_data)} 字节")
             except Exception as e:
                 logger.error(f"读取音频文件失败: {str(e)}")
                 raise
@@ -627,29 +639,38 @@ class VoiceConverter:
             logger.info(f"音调调整: {pitch_adjust}")
 
             start_time = time.time()
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.api_url}/wav2wav",
-                    data=data,
-                    timeout=self.timeout
-                ) as response:
-                    if response.status == 200:
-                        # 确保输出目录存在
-                        os.makedirs(os.path.dirname(output_wav), exist_ok=True)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.api_url}/wav2wav",
+                        data=data,
+                        timeout=self.timeout
+                    ) as response:
+                        if response.status == 200:
+                            # 确保输出目录存在
+                            os.makedirs(os.path.dirname(output_wav), exist_ok=True)
 
-                        # 保存转换后的音频
-                        with open(output_wav, "wb") as f:
-                            f.write(await response.read())
+                            # 保存转换后的音频
+                            audio_content = await response.read()
+                            with open(output_wav, "wb") as f:
+                                f.write(audio_content)
 
-                        process_time = time.time() - start_time
-                        logger.info(f"转换成功！输出文件已保存为: {output_wav}")
-                        logger.info(f"处理耗时: {process_time:.2f}秒")
-                        return True
-                    else:
-                        error_msg = await response.text()
-                        logger.error(f"转换失败！状态码: {response.status}")
-                        logger.error(f"错误信息: {error_msg}")
-                        return False
+                            process_time = time.time() - start_time
+                            logger.info(f"转换成功！输出文件已保存为: {output_wav}")
+                            logger.info(f"输出文件大小: {os.path.getsize(output_wav)} 字节")
+                            logger.info(f"处理耗时: {process_time:.2f}秒")
+                            return True
+                        else:
+                            error_msg = await response.text()
+                            logger.error(f"转换失败！状态码: {response.status}")
+                            logger.error(f"错误信息: {error_msg}")
+                            return False
+            except asyncio.TimeoutError:
+                logger.error("转换请求超时")
+                raise
+            except Exception as e:
+                logger.error(f"发送转换请求时出错: {str(e)}")
+                raise
 
         except Exception as e:
             logger.error(f"转换过程中发生错误: {str(e)}")
