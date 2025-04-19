@@ -6,7 +6,7 @@
 提供搜索和下载网易云音乐的功能
 """
 
-import requests
+import aiohttp
 import json
 import os
 import urllib.parse
@@ -52,7 +52,7 @@ class NeteaseMusicAPI:
         """计算文本的MD5摘要并转换为十六进制字符串"""
         return self._hex_digest(self._hash_digest(text))
 
-    def _post(self, url, params):
+    async def _post(self, url, params):
         """发送POST请求"""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/2.10.2.200154",
@@ -60,12 +60,17 @@ class NeteaseMusicAPI:
         }
         cookies = {"os": "pc", "appver": "", "osver": "", "deviceId": "pyncm!"}
         cookies.update(self.cookies)
-        response = requests.post(
-            url, headers=headers, cookies=cookies, data={"params": params}
-        )
-        return response.text
 
-    def search(self, keyword, limit=30):
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                headers=headers,
+                cookies=cookies,
+                data={"params": params}
+            ) as response:
+                return await response.text()
+
+    async def search(self, keyword, limit=30):
         """搜索歌曲
 
         Args:
@@ -108,7 +113,7 @@ class NeteaseMusicAPI:
         enc = encryptor.update(padded_data) + encryptor.finalize()
         params = self._hex_digest(enc)
 
-        response_text = self._post(url, params)
+        response_text = await self._post(url, params)
 
         try:
             result = json.loads(response_text)
@@ -135,7 +140,7 @@ class NeteaseMusicAPI:
             print(f"解析JSON失败，响应内容: {response_text[:100]}...")
             return []
 
-    def get_song_url(self, song_id, level="lossless"):
+    async def get_song_url(self, song_id, level="lossless"):
         """获取歌曲下载链接
 
         Args:
@@ -177,7 +182,7 @@ class NeteaseMusicAPI:
         enc = encryptor.update(padded_data) + encryptor.finalize()
         params = self._hex_digest(enc)
 
-        response_text = self._post(url, params)
+        response_text = await self._post(url, params)
 
         try:
             result = json.loads(response_text)
@@ -192,7 +197,7 @@ class NeteaseMusicAPI:
             print(f"解析JSON失败，响应内容: {response_text[:100]}...")
             return None
 
-    def get_song_detail(self, song_id):
+    async def get_song_detail(self, song_id):
         """获取歌曲详细信息
 
         Args:
@@ -203,8 +208,10 @@ class NeteaseMusicAPI:
         """
         url = "https://interface3.music.163.com/api/v3/song/detail"
         data = {"c": json.dumps([{"id": song_id, "v": 0}])}
-        response = requests.post(url=url, data=data)
-        result = response.json()
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=url, data=data) as response:
+                result = await response.json()
 
         if "songs" in result and result["songs"]:
             song = result["songs"][0]
@@ -216,7 +223,7 @@ class NeteaseMusicAPI:
             }
         return None
 
-    def get_lyric(self, song_id):
+    async def get_lyric(self, song_id):
         """获取歌词
 
         Args:
@@ -237,8 +244,10 @@ class NeteaseMusicAPI:
             "ytv": "0",
             "yrv": "0",
         }
-        response = requests.post(url=url, data=data, cookies=self.cookies)
-        result = response.json()
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=url, data=data, cookies=self.cookies) as response:
+                result = await response.json()
 
         return {
             "lyric": result.get("lrc", {}).get("lyric", ""),
@@ -282,7 +291,7 @@ class NeteaseMusicAPI:
             value = value / size
         return value
 
-    def get_song_with_highest_quality(self, keyword):
+    async def get_song_with_highest_quality(self, keyword):
         """获取搜索到的第一首歌曲的最高音质版本
 
         Args:
@@ -292,7 +301,7 @@ class NeteaseMusicAPI:
             歌曲信息，包括下载链接、歌词等
         """
         # 1. 搜索歌曲
-        songs = self.search(keyword)
+        songs = await self.search(keyword)
 
         if not songs:
             print(f"未找到与 '{keyword}' 相关的歌曲")
@@ -314,7 +323,7 @@ class NeteaseMusicAPI:
         ]
 
         for quality in qualities:
-            url_info = self.get_song_url(song_id, quality)
+            url_info = await self.get_song_url(song_id, quality)
 
             if url_info:
                 song_url = url_info["url"]
@@ -322,7 +331,7 @@ class NeteaseMusicAPI:
                 song_level = url_info["level"]
 
                 # 4. 获取歌词
-                lyric_info = self.get_lyric(song_id)
+                lyric_info = await self.get_lyric(song_id)
 
                 # 5. 返回结果
                 return {
@@ -342,7 +351,7 @@ class NeteaseMusicAPI:
         print("获取歌曲详情失败")
         return None
 
-    def download_song(self, song_info, save_path=None):
+    async def download_song(self, song_info, save_path=None):
         """下载歌曲
 
         Args:
@@ -367,22 +376,24 @@ class NeteaseMusicAPI:
             file_path = f"{song_name}.mp3"
 
         print(f"开始下载 {song_name}...")
-        response = requests.get(download_url, stream=True)
-        if response.status_code == 200:
-            with open(file_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            print(f"歌曲已下载到 {file_path}")
-            return file_path
-        else:
-            print("下载失败")
-            return None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(download_url) as response:
+                if response.status == 200:
+                    with open(file_path, "wb") as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            if chunk:
+                                f.write(chunk)
+                    print(f"歌曲已下载到 {file_path}")
+                    return file_path
+                else:
+                    print("下载失败")
+                    return None
 
 
 # 使用示例
 if __name__ == "__main__":
     import argparse
+    import asyncio
 
     parser = argparse.ArgumentParser(description="网易云音乐API工具")
     parser.add_argument("keyword", help="搜索关键词")
@@ -395,8 +406,11 @@ if __name__ == "__main__":
     api = NeteaseMusicAPI()
 
     # 搜索并获取最高音质版本
-    song = api.get_song_with_highest_quality(args.keyword)
+    async def main():
+        song = await api.get_song_with_highest_quality(args.keyword)
 
-    # 如果需要下载歌曲
-    if args.download and song:
-        api.download_song(song, args.save_path)
+        # 如果需要下载歌曲
+        if args.download and song:
+            await api.download_song(song, args.save_path)
+
+    asyncio.run(main())

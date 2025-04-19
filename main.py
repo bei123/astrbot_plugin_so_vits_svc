@@ -10,7 +10,6 @@ from typing import Optional, Dict, List
 import os
 import time
 import uuid
-import requests
 import json
 import aiohttp
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
@@ -42,24 +41,25 @@ class MSSTProcessor:
             api_url: MSST-WebUI API 地址
         """
         self.api_url = api_url
-        self.session = requests.Session()
+        self.session = None
         self.available_presets = self.get_presets()
         self.batch_size = None  # 将由get_optimal_batch_size自动设置
         self.use_tta = False
         self.force_cpu = False
 
-    def get_presets(self) -> List[str]:
+    async def get_presets(self) -> List[str]:
         """获取可用的预设列表
 
         Returns:
             预设文件列表
         """
         try:
-            response = self.session.get(f"{self.api_url}/presets")
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("status") == "success":
-                    return result.get("presets", [])
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.api_url}/presets") as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if result.get("status") == "success":
+                            return result.get("presets", [])
             logger.error(f"获取预设列表失败: {response.text}")
             return []
         except Exception as e:
@@ -84,7 +84,7 @@ class MSSTProcessor:
 
         return os.path.join("presets", preferred_preset)
 
-    def process_audio(
+    async def process_audio(
         self, input_file: str, preset_name: str = "wav.json"
     ) -> Optional[Dict]:
         """处理音频文件
@@ -114,24 +114,28 @@ class MSSTProcessor:
 
             # 发送请求
             try:
-                response = self.session.post(
-                    f"{self.api_url}/infer/local", files=files, data=data, timeout=3000
-                )
-            except requests.Timeout:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.api_url}/infer/local",
+                        data=data,
+                        files=files,
+                        timeout=3000
+                    ) as response:
+                        if response.status == 200:
+                            result = await response.json()
+                            if result["status"] == "success":
+                                return result
+                            else:
+                                logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
+                        else:
+                            logger.error(f"MSST处理失败: {response.text}")
+
+            except asyncio.TimeoutError:
                 logger.error("MSST处理请求超时")
                 return None
-            except requests.RequestException as e:
+            except aiohttp.ClientError as e:
                 logger.error(f"MSST处理请求失败: {str(e)}")
                 return None
-
-            if response.status_code == 200:
-                result = response.json()
-                if result["status"] == "success":
-                    return result
-                else:
-                    logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
-            else:
-                logger.error(f"MSST处理失败: {response.text}")
 
             return None
 
@@ -210,7 +214,6 @@ class VoiceConverter:
         self.revb_gain = self.mixing_config.get("revb_gain", 0)
 
         # 初始化组件
-        self.session = requests.Session()
         self.msst_processor = MSSTProcessor(self.msst_url)
         self.netease_api = NeteaseMusicAPI(self.config)
         self.bilibili_api = BilibiliAPI(self.config)
@@ -396,15 +399,16 @@ class VoiceConverter:
             logger.error(f"混音处理失败: {str(e)}")
             return False
 
-    def check_health(self) -> Optional[Dict]:
+    async def check_health(self) -> Optional[Dict]:
         """检查服务健康状态
 
         Returns:
             健康状态信息字典，失败返回 None
         """
         try:
-            response = self.session.get(f"{self.api_url}/health")
-            return response.json()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.api_url}/health") as response:
+                    return await response.json()
         except Exception as e:
             logger.error(f"健康检查失败: {str(e)}")
             return None
@@ -453,7 +457,7 @@ class VoiceConverter:
                     raise FileNotFoundError(f"输入文件不存在: {input_wav}")
 
                 # 检查服务健康状态
-                health = self.check_health()
+                health = await self.check_health()
                 if not health:
                     raise RuntimeError("服务未就绪")
 
@@ -553,7 +557,7 @@ class VoiceConverter:
             cr_threshold = self.default_cr_threshold
 
         # 检查服务健康状态
-        health = self.check_health()
+        health = asyncio.run(self.check_health())
         if not health:
             raise RuntimeError("服务未就绪")
 
@@ -606,29 +610,34 @@ class VoiceConverter:
             logger.info(f"交叉参考阈值: {cr_threshold}")
 
             start_time = time.time()
-            response = self.session.post(
-                f"{self.api_url}/wav2wav", data=data, files=files, timeout=self.timeout
-            )
+            async def _convert():
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.api_url}/wav2wav",
+                        data=data,
+                        files=files,
+                        timeout=self.timeout
+                    ) as response:
+                        if response.status == 200:
+                            with open(output_wav, "wb") as f:
+                                f.write(await response.read())
 
-            # 处理响应
-            if response.status_code == 200:
-                with open(output_wav, "wb") as f:
-                    f.write(response.content)
+                            process_time = time.time() - start_time
+                            logger.info(f"转换成功！输出文件已保存为: {output_wav}")
+                            logger.info(f"处理耗时: {process_time:.2f}秒")
+                            return True
+                        else:
+                            try:
+                                error_msg = (await response.json()).get("error", "未知错误")
+                            except (json.JSONDecodeError, AttributeError):
+                                error_msg = f"HTTP {response.status}: {response.text}"
+                            logger.error(f"转换失败！状态码: {response.status}")
+                            logger.error(f"错误信息: {error_msg}")
+                            return False
 
-                process_time = time.time() - start_time
-                logger.info(f"转换成功！输出文件已保存为: {output_wav}")
-                logger.info(f"处理耗时: {process_time:.2f}秒")
-                return True
-            else:
-                try:
-                    error_msg = response.json().get("error", "未知错误")
-                except (json.JSONDecodeError, AttributeError):
-                    error_msg = f"HTTP {response.status_code}: {response.text}"
-                logger.error(f"转换失败！状态码: {response.status_code}")
-                logger.error(f"错误信息: {error_msg}")
-                return False
+            return asyncio.run(_convert())
 
-        except requests.Timeout:
+        except asyncio.TimeoutError:
             logger.error("请求超时")
             return False
         except Exception as e:
@@ -808,7 +817,7 @@ class SoVitsSvcPlugin(Star):
     @command("svc_status")
     async def check_status(self, event: AstrMessageEvent):
         """检查服务状态"""
-        health = self.converter.check_health()
+        health = await self.converter.check_health()
         if not health:
             yield event.plain_result(
                 "服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。"
@@ -1074,7 +1083,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result("正在使用MSST分离人声和伴奏...")
 
             # 使用MSST分离人声和伴奏
-            msst_result = self.converter.msst_processor.process_audio(
+            msst_result = await self.converter.msst_processor.process_audio(
                 input_file,
                 self.converter.msst_preset
             )
