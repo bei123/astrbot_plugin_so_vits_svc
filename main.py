@@ -904,6 +904,8 @@ class SoVitsSvcPlugin(Star):
         input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
         output_file = os.path.join(self.temp_dir, f"output_{uuid.uuid4()}.wav")
         mixed_file = os.path.join(self.temp_dir, f"mixed_{uuid.uuid4()}.wav")
+        vocal_file = os.path.join(self.temp_dir, f"vocal_{uuid.uuid4()}.wav")
+        inst_file = os.path.join(self.temp_dir, f"inst_{uuid.uuid4()}.wav")
 
         # 生成任务ID
         task_id = str(uuid.uuid4())
@@ -1072,128 +1074,124 @@ class SoVitsSvcPlugin(Star):
                     yield event.plain_result("无法处理此类型的文件！")
                     return
 
-            # 转换音频
-            yield event.plain_result("正在转换音频，请稍候...")
+            # 检查缓存
+            cache_params = {
+                "k_step": self.converter.default_k_step,
+                "shallow_diffusion": self.converter.default_shallow_diffusion,
+                "only_diffusion": self.converter.default_only_diffusion,
+                "cluster_infer_ratio": self.converter.default_cluster_infer_ratio,
+                "auto_predict_f0": self.converter.default_auto_predict_f0,
+                "noice_scale": self.converter.default_noice_scale,
+                "f0_filter": self.converter.default_f0_filter,
+                "f0_predictor": self.converter.default_f0_predictor,
+                "enhancer_adaptive_key": self.converter.default_enhancer_adaptive_key,
+                "cr_threshold": self.converter.default_cr_threshold
+            }
 
-            # 创建异步任务
-            task = asyncio.create_task(
-                self.converter.convert_voice_async(
-                    input_wav=input_file,
+            cached_file = self.converter.cache_manager.get_cache(
+                input_file,
+                speaker_id,
+                pitch_adjust,
+                **cache_params
+            )
+
+            if cached_file:
+                logger.info(f"使用缓存: {cached_file}")
+                chain = [Record.fromFileSystem(cached_file)]
+                yield event.chain_result(chain)
+                return
+
+            # 开始处理流程
+            yield event.plain_result("正在使用MSST分离人声和伴奏...")
+
+            # 使用MSST分离人声和伴奏
+            msst_result = self.converter.msst_processor.process_audio(
+                input_file,
+                self.converter.msst_preset
+            )
+
+            if not msst_result or msst_result.get("status") != "success":
+                yield event.plain_result(f"MSST处理失败：{msst_result.get('message', '未知错误') if msst_result else '处理失败'}")
+                return
+
+            # 下载分离后的文件
+            try:
+                vocal_download = await self.converter.msst_processor.download_file(
+                    "input_vocals_noreverb.wav",
+                    vocal_file
+                )
+                inst_download = await self.converter.msst_processor.download_file(
+                    "input_instrumental.wav",
+                    inst_file
+                )
+
+                if not vocal_download or not inst_download:
+                    yield event.plain_result("下载分离后的音频文件失败！")
+                    return
+
+                if not os.path.exists(vocal_file) or not os.path.exists(inst_file):
+                    yield event.plain_result("未能成功获取分离后的音频文件！")
+                    return
+
+            except Exception as e:
+                logger.error(f"下载分离文件时出错: {str(e)}")
+                yield event.plain_result(f"下载分离文件时出错：{str(e)}")
+                return
+
+            # 转换人声
+            yield event.plain_result("正在转换人声...")
+            try:
+                convert_success = await self.converter.convert_voice_async(
+                    input_wav=vocal_file,
                     output_wav=output_file,
                     speaker_id=speaker_id,
                     pitch_adjust=pitch_adjust,
                 )
-            )
-
-            # 存储任务
-            self.conversion_tasks[task_id] = {
-                "task": task,
-                "input_file": input_file,
-                "output_file": output_file,
-                "mixed_file": mixed_file,
-                "event": event
-            }
-
-            # 等待任务完成
-            success = await task
-
-            if success:
-                yield event.plain_result("正在使用MSST分离人声和伴奏...")
-
-                # 使用MSST分离人声和伴奏
-                msst_result = self.converter.msst_processor.process_audio(
-                    input_file,
-                    self.converter.msst_preset
-                )
-
-                if not msst_result:
-                    yield event.plain_result("MSST处理失败！")
-                    return
-
-                # 检查MSST处理结果
-                if msst_result.get("status") != "success":
-                    yield event.plain_result(f"MSST处理失败：{msst_result.get('message', '未知错误')}")
-                    return
-
-                # 下载分离后的人声和伴奏文件
-                vocal_file = os.path.join(self.temp_dir, "input_vocals_noreverb.wav")
-                inst_file = os.path.join(self.temp_dir, "input_instrumental.wav")
-
-                # 异步下载文件
-                try:
-                    vocal_download = await self.converter.msst_processor.download_file(
-                        "input_vocals_noreverb.wav",
-                        vocal_file
-                    )
-                    inst_download = await self.converter.msst_processor.download_file(
-                        "input_instrumental.wav",
-                        inst_file
-                    )
-
-                    if not vocal_download or not inst_download:
-                        yield event.plain_result("下载分离后的音频文件失败！")
-                        return
-
-                    if not os.path.exists(vocal_file) or not os.path.exists(inst_file):
-                        yield event.plain_result("未能成功获取分离后的音频文件！")
-                        return
-
-                except Exception as e:
-                    logger.error(f"下载分离文件时出错: {str(e)}")
-                    yield event.plain_result(f"下载分离文件时出错：{str(e)}")
-                    return
-
-                yield event.plain_result("正在转换人声...")
-
-                # 使用分离后的人声进行转换
-                convert_task = asyncio.create_task(
-                    self.converter.convert_voice_async(
-                        input_wav=vocal_file,  # 使用分离后的人声
-                        output_wav=output_file,
-                        speaker_id=speaker_id,
-                        pitch_adjust=pitch_adjust,
-                    )
-                )
-
-                # 等待转换完成
-                try:
-                    convert_success = await convert_task
-                except Exception as e:
-                    logger.error(f"人声转换时出错: {str(e)}")
-                    yield event.plain_result(f"人声转换时出错：{str(e)}")
-                    return
 
                 if not convert_success:
                     yield event.plain_result("人声转换失败！")
                     return
 
-                yield event.plain_result("正在混音处理...")
+            except Exception as e:
+                logger.error(f"人声转换时出错: {str(e)}")
+                yield event.plain_result(f"人声转换时出错：{str(e)}")
+                return
 
-                # 混音处理
-                try:
-                    mix_success = self.converter.mix_audio(
-                        vocal_path=output_file,  # 使用转换后的人声
-                        inst_path=inst_file,     # 使用分离后的伴奏
-                        output_path=mixed_file
-                    )
+            # 混音处理
+            yield event.plain_result("正在混音处理...")
+            try:
+                mix_success = self.converter.mix_audio(
+                    vocal_path=output_file,
+                    inst_path=inst_file,
+                    output_path=mixed_file
+                )
 
-                    if not mix_success:
-                        yield event.plain_result("混音处理失败！")
-                        return
-
-                except Exception as e:
-                    logger.error(f"混音处理时出错: {str(e)}")
-                    yield event.plain_result(f"混音处理时出错：{str(e)}")
+                if not mix_success:
+                    yield event.plain_result("混音处理失败！")
                     return
 
-                yield event.plain_result("处理完成！正在发送文件...")
-                chain = [Record.fromFileSystem(mixed_file)]
-                yield event.chain_result(chain)
-            else:
-                yield event.plain_result("转换失败！请检查服务状态或参数是否正确。")
+            except Exception as e:
+                logger.error(f"混音处理时出错: {str(e)}")
+                yield event.plain_result(f"混音处理时出错：{str(e)}")
+                return
+
+            # 保存到缓存
+            self.converter.cache_manager.save_cache(
+                input_file,
+                mixed_file,
+                speaker_id,
+                pitch_adjust,
+                **cache_params
+            )
+
+            # 发送结果
+            yield event.plain_result("处理完成！正在发送文件...")
+            chain = [Record.fromFileSystem(mixed_file)]
+            yield event.chain_result(chain)
 
         except Exception as e:
-            yield event.plain_result(f"转换过程中发生错误：{str(e)}")
+            logger.error(f"处理过程中发生错误: {str(e)}")
+            yield event.plain_result(f"处理过程中发生错误：{str(e)}")
         finally:
             # 清理任务
             if task_id in self.conversion_tasks:
