@@ -100,54 +100,70 @@ class MSSTProcessor:
         Returns:
             处理结果字典，失败返回 None
         """
-        try:
-            available_preset = self.find_available_preset(preset_name)
-            logger.info(f"使用预设文件: {available_preset}")
+        max_retries = 3
+        retry_delay = 5  # 秒
 
-            with open(input_file, "rb") as f:
-                audio_data = f.read()
-
-            # 准备表单数据
-            data = aiohttp.FormData()
-            data.add_field("input_file",
-                         audio_data,
-                         filename="input.wav",
-                         content_type="audio/wav")
-            data.add_field("preset_path", available_preset)
-            data.add_field("output_format", "wav")
-            data.add_field("extra_output_dir", "false")
-            data.add_field("use_tta", str(self.use_tta).lower())
-            data.add_field("force_cpu", str(self.force_cpu).lower())
-
-            # 发送请求
+        for attempt in range(max_retries):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{self.api_url}/infer/local",
-                        data=data,
-                        timeout=3000
-                    ) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            if result["status"] == "success":
-                                return result
+                available_preset = self.find_available_preset(preset_name)
+                logger.info(f"使用预设文件: {available_preset}")
+
+                with open(input_file, "rb") as f:
+                    audio_data = f.read()
+
+                # 准备表单数据
+                data = aiohttp.FormData()
+                data.add_field("input_file",
+                             audio_data,
+                             filename="input.wav",
+                             content_type="audio/wav")
+                data.add_field("preset_path", available_preset)
+                data.add_field("output_format", "wav")
+                data.add_field("extra_output_dir", "false")
+                data.add_field("use_tta", str(self.use_tta).lower())
+                data.add_field("force_cpu", str(self.force_cpu).lower())
+
+                # 发送请求
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"{self.api_url}/infer/local",
+                            data=data,
+                            timeout=3000
+                        ) as response:
+                            if response.status == 200:
+                                result = await response.json()
+                                if result["status"] == "success":
+                                    return result
+                                else:
+                                    logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
                             else:
-                                logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
-                        else:
-                            logger.error(f"MSST处理失败: {response.text}")
+                                logger.error(f"MSST处理失败: {response.text}")
 
-            except asyncio.TimeoutError:
-                logger.error("MSST处理请求超时")
+                except asyncio.TimeoutError:
+                    logger.error("MSST处理请求超时")
+                    if attempt < max_retries - 1:
+                        logger.info(f"将在 {retry_delay} 秒后重试...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    return None
+                except aiohttp.ClientError as e:
+                    logger.error(f"MSST处理请求失败: {str(e)}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"将在 {retry_delay} 秒后重试...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    return None
+
                 return None
-            except aiohttp.ClientError as e:
-                logger.error(f"MSST处理请求失败: {str(e)}")
+
+            except Exception as e:
+                logger.error(f"MSST处理出错: {str(e)}")
+                if attempt < max_retries - 1:
+                    logger.info(f"将在 {retry_delay} 秒后重试...")
+                    await asyncio.sleep(retry_delay)
+                    continue
                 return None
-
-            return None
-
-        except Exception as e:
-            logger.error(f"MSST处理出错: {str(e)}")
-            return None
 
     async def download_file(self, filename: str, output_path: str) -> bool:
         """下载处理后的文件
@@ -500,7 +516,7 @@ class VoiceConverter:
             finally:
                 self.current_task = None
 
-    def convert_voice(
+    async def convert_voice(
         self,
         input_wav: str,
         output_wav: str,
@@ -584,23 +600,25 @@ class VoiceConverter:
             with open(input_wav, "rb") as f:
                 audio_data = f.read()
 
-            # 准备请求数据
-            files = {"audio": ("input.wav", audio_data, "audio/wav")}
-            data = {
-                "tran": str(pitch_adjust),
-                "spk": str(speaker_id),
-                "wav_format": "wav",
-                "k_step": str(k_step),
-                "shallow_diffusion": str(shallow_diffusion).lower(),
-                "only_diffusion": str(only_diffusion).lower(),
-                "cluster_infer_ratio": str(cluster_infer_ratio),
-                "auto_predict_f0": str(auto_predict_f0).lower(),
-                "noice_scale": str(noice_scale),
-                "f0_filter": str(f0_filter).lower(),
-                "f0_predictor": f0_predictor,
-                "enhancer_adaptive_key": str(enhancer_adaptive_key),
-                "cr_threshold": str(cr_threshold),
-            }
+            # 准备表单数据
+            data = aiohttp.FormData()
+            data.add_field("audio",
+                         audio_data,
+                         filename="input.wav",
+                         content_type="audio/wav")
+            data.add_field("tran", str(pitch_adjust))
+            data.add_field("spk", str(speaker_id))
+            data.add_field("wav_format", "wav")
+            data.add_field("k_step", str(k_step))
+            data.add_field("shallow_diffusion", str(shallow_diffusion).lower())
+            data.add_field("only_diffusion", str(only_diffusion).lower())
+            data.add_field("cluster_infer_ratio", str(cluster_infer_ratio))
+            data.add_field("auto_predict_f0", str(auto_predict_f0).lower())
+            data.add_field("noice_scale", str(noice_scale))
+            data.add_field("f0_filter", str(f0_filter).lower())
+            data.add_field("f0_predictor", f0_predictor)
+            data.add_field("enhancer_adaptive_key", str(enhancer_adaptive_key))
+            data.add_field("cr_threshold", str(cr_threshold))
 
             # 发送请求
             logger.info(f"开始转换音频: {input_wav}")
@@ -623,7 +641,6 @@ class VoiceConverter:
                     async with session.post(
                         f"{self.api_url}/wav2wav",
                         data=data,
-                        files=files,
                         timeout=self.timeout
                     ) as response:
                         if response.status == 200:
