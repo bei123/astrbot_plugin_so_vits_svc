@@ -299,7 +299,7 @@ class NeteaseMusicAPI:
             keyword: 搜索关键词
 
         Returns:
-            歌曲信息，包括下载链接、歌词等
+            歌曲信息，包括下载链接等
         """
         # 1. 搜索歌曲
         songs = await self.search(keyword)
@@ -331,22 +331,17 @@ class NeteaseMusicAPI:
                 song_size = url_info["size"]
                 song_level = url_info["level"]
 
-                # 4. 获取歌词
-                lyric_info = await self.get_lyric(song_id)
-
-                # 5. 返回结果
+                # 4. 返回结果
                 return {
                     "status": 200,
                     "id": song_id,
                     "name": first_song["name"],
-                    "pic": first_song.get("pic_url", ""),  # 使用新的字段名
+                    "pic": first_song.get("pic_url", ""),
                     "ar_name": ", ".join(first_song["artists"]),
                     "al_name": first_song["album"],
                     "level": self.get_music_level(song_level),
                     "size": self.format_size(song_size),
-                    "url": song_url,
-                    "lyric": lyric_info["lyric"],
-                    "tlyric": lyric_info["tlyric"],
+                    "url": song_url
                 }
 
         print("获取歌曲详情失败")
