@@ -59,6 +59,73 @@
                 "hint": "是否将转换后的人声与原伴奏混音",
                 "default": true
             },
+            "mixing_params": {
+                "description": "混音参数设置",
+                "type": "object",
+                "hint": "混音处理的相关参数设置",
+                "items": {
+                    "sample_rate": {
+                        "description": "采样率",
+                        "type": "int",
+                        "hint": "音频处理的采样率",
+                        "default": 44100
+                    },
+                    "headroom": {
+                        "description": "伴奏增益",
+                        "type": "float",
+                        "hint": "伴奏的音量增益，单位dB",
+                        "default": -8
+                    },
+                    "voc_input": {
+                        "description": "人声输入增益",
+                        "type": "float",
+                        "hint": "人声的输入增益，单位dB",
+                        "default": -4
+                    },
+                    "revb_gain": {
+                        "description": "混响增益",
+                        "type": "float",
+                        "hint": "混响效果的增益，单位dB",
+                        "default": 0
+                    },
+                    "comp_release": {
+                        "description": "压缩器释放时间",
+                        "type": "int",
+                        "hint": "压缩器的释放时间(ms)",
+                        "default": 300
+                    },
+                    "comp_feedback": {
+                        "description": "压缩器反馈时间",
+                        "type": "int",
+                        "hint": "压缩器的反馈时间(ms)",
+                        "default": 180
+                    },
+                    "reverb_short": {
+                        "description": "短混响时间",
+                        "type": "int",
+                        "hint": "短混响的时间(ms)",
+                        "default": 5
+                    },
+                    "reverb_medium": {
+                        "description": "中混响时间",
+                        "type": "int",
+                        "hint": "中混响的时间(ms)",
+                        "default": 25
+                    },
+                    "reverb_long": {
+                        "description": "长混响时间",
+                        "type": "int",
+                        "hint": "长混响的时间(ms)",
+                        "default": 50
+                    },
+                    "delay_time": {
+                        "description": "延迟时间",
+                        "type": "int",
+                        "hint": "延迟效果的时间(ms)",
+                        "default": 200
+                    }
+                }
+            },
             "max_queue_size": {
                 "description": "最大队列大小",
                 "type": "int",
