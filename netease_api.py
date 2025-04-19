@@ -247,12 +247,13 @@ class NeteaseMusicAPI:
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url=url, data=data, cookies=self.cookies) as response:
-                result = await response.json()
-
-        return {
-            "lyric": result.get("lrc", {}).get("lyric", ""),
-            "tlyric": result.get("tlyric", {}).get("lyric", None),
-        }
+                response_text = await response.text()
+                try:
+                    result = json.loads(response_text)
+                    return result
+                except json.JSONDecodeError:
+                    print(f"解析歌词JSON失败，响应内容: {response_text[:100]}...")
+                    return None
 
     def get_music_level(self, value):
         """获取音质描述
