@@ -107,14 +107,17 @@ class MSSTProcessor:
             with open(input_file, "rb") as f:
                 audio_data = f.read()
 
-            files = {"input_file": ("input.wav", audio_data, "audio/wav")}
-            data = {
-                "preset_path": available_preset,
-                "output_format": "wav",
-                "extra_output_dir": "false",
-                "use_tta": str(self.use_tta).lower(),
-                "force_cpu": str(self.force_cpu).lower()
-            }
+            # 准备表单数据
+            data = aiohttp.FormData()
+            data.add_field("input_file",
+                         audio_data,
+                         filename="input.wav",
+                         content_type="audio/wav")
+            data.add_field("preset_path", available_preset)
+            data.add_field("output_format", "wav")
+            data.add_field("extra_output_dir", "false")
+            data.add_field("use_tta", str(self.use_tta).lower())
+            data.add_field("force_cpu", str(self.force_cpu).lower())
 
             # 发送请求
             try:
@@ -122,7 +125,6 @@ class MSSTProcessor:
                     async with session.post(
                         f"{self.api_url}/infer/local",
                         data=data,
-                        files=files,
                         timeout=3000
                     ) as response:
                         if response.status == 200:
