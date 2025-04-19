@@ -1142,12 +1142,22 @@ class SoVitsSvcPlugin(Star):
                 "cr_threshold": self.converter.default_cr_threshold
             }
 
-            cached_file = self.converter.cache_manager.get_cache(
-                input_file,
-                speaker_id,
-                pitch_adjust,
-                **cache_params
-            )
+            # 根据是否混音决定缓存文件
+            if self.converter.enable_mixing:
+                cached_file = self.converter.cache_manager.get_cache(
+                    input_file,
+                    speaker_id,
+                    pitch_adjust,
+                    **cache_params
+                )
+            else:
+                # 不混音时,缓存转换后的人声文件
+                cached_file = self.converter.cache_manager.get_cache(
+                    vocal_file,  # 使用分离后的人声文件作为缓存键
+                    speaker_id,
+                    pitch_adjust,
+                    **cache_params
+                )
 
             if cached_file:
                 logger.info(f"使用缓存: {cached_file}")
@@ -1268,7 +1278,7 @@ class SoVitsSvcPlugin(Star):
                     yield event.plain_result(f"混音处理时出错：{str(e)}")
                     return
 
-                # 保存到缓存
+                # 保存混音后的文件到缓存
                 self.converter.cache_manager.save_cache(
                     input_file,
                     mixed_file,
@@ -1282,7 +1292,16 @@ class SoVitsSvcPlugin(Star):
                 chain = [Record.fromFileSystem(mixed_file)]
                 yield event.chain_result(chain)
             else:
-                # 如果不混音，直接发送转换后的人声
+                # 如果不混音，保存转换后的人声到缓存
+                self.converter.cache_manager.save_cache(
+                    vocal_file,  # 使用分离后的人声文件作为缓存键
+                    output_file,  # 缓存转换后的人声文件
+                    speaker_id,
+                    pitch_adjust,
+                    **cache_params
+                )
+
+                # 发送结果
                 yield event.plain_result("处理完成！正在发送文件...")
                 chain = [Record.fromFileSystem(output_file)]
                 yield event.chain_result(chain)
