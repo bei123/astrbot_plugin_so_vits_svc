@@ -4,3 +4,4 @@ anyio>=3.7.1
 pedalboard
 numpy
 librosa
+qqmusic-api-python
