@@ -159,35 +159,30 @@ class QQMusicAPI:
                 qr = await get_qrcode(QRLoginType.QQ)
 
                 # 保存二维码到QQapi目录
-                qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi", "login_qr.png")
+                qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi")
+                qr_path = os.path.join(qr_dir, "login_qr.png")
 
                 # 确保目录存在
                 os.makedirs(qr_dir, exist_ok=True)
 
                 # 保存新二维码
                 try:
-                    qr.save(qr_dir)
-                    logger.info(f"二维码已保存到: {qr_dir}")
+                    qr.save(qr_path)
+                    logger.info(f"二维码已保存到: {qr_path}")
                 except Exception as e:
                     logger.error(f"保存二维码失败: {str(e)}")
                     return False
 
-                # 获取最新的二维码文件并转换为base64
+                # 读取二维码文件并转换为base64
                 try:
-                    latest_qr_file = self._get_latest_qr_file(qr_dir)
-                    if not latest_qr_file:
-                        logger.error("未找到二维码文件")
-                        return False
-
-                    with open(latest_qr_file, "rb") as f:
+                    with open(qr_path, "rb") as f:
                         qr_base64 = base64.b64encode(f.read()).decode()
+                        logger.info("请复制以下链接到浏览器打开二维码:")
+                        logger.info(f"data:image/png;base64,{qr_base64}")
                 except Exception as e:
                     logger.error(f"读取二维码文件失败: {str(e)}")
                     return False
 
-                # 输出二维码的base64数据
-                logger.info("请复制以下链接到浏览器打开二维码:")
-                logger.info(f"data:image/png;base64,{qr_base64}")
                 logger.info("请使用QQ音乐APP扫描二维码")
 
                 # 等待扫码
