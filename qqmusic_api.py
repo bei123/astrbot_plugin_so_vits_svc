@@ -161,19 +161,14 @@ class QQMusicAPI:
                 # 保存二维码到QQapi目录
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 qr_dir = os.path.join(current_dir, "QQapi")
-                qr_path = os.path.join(qr_dir, "login_qr.png")
 
                 # 确保目录存在
                 if not os.path.exists(qr_dir):
                     os.makedirs(qr_dir)
 
-                # 如果存在旧的二维码文件，先删除
-                if os.path.exists(qr_path):
-                    os.remove(qr_path)
-
                 # 保存新二维码
                 try:
-                    qr.save(qr_path)
+                    qr_path = qr.save(qr_dir)  # 使用QR对象自带的save方法，它会返回保存的文件路径
                     logger.info(f"二维码已保存到: {qr_path}")
                 except Exception as e:
                     logger.error(f"保存二维码失败: {str(e)}")
