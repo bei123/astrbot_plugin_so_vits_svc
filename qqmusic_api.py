@@ -182,8 +182,13 @@ class QQMusicAPI:
                         
                     with open(qr_path, "rb") as f:
                         qr_base64 = base64.b64encode(f.read()).decode()
+                        base64_url = f"data:image/png;base64,{qr_base64}"
                         logger.info("请复制以下链接到浏览器打开二维码:")
-                        logger.info(f"data:image/png;base64,{qr_base64}")
+                        logger.info(base64_url)
+                        # 同时输出到控制台，方便复制
+                        print("\n请复制以下链接到浏览器打开二维码:")
+                        print(base64_url)
+                        print()  # 添加空行使输出更清晰
                 except Exception as e:
                     logger.error(f"读取二维码文件失败: {str(e)}")
                     return False
