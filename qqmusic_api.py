@@ -159,11 +159,17 @@ class QQMusicAPI:
                 qr = await get_qrcode(QRLoginType.QQ)
 
                 # 保存二维码到QQapi目录
-                qr_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "QQapi")
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                qr_dir = os.path.join(current_dir, "QQapi")
                 qr_path = os.path.join(qr_dir, "login_qr.png")
 
                 # 确保目录存在
-                os.makedirs(qr_dir, exist_ok=True)
+                if not os.path.exists(qr_dir):
+                    os.makedirs(qr_dir)
+
+                # 如果存在旧的二维码文件，先删除
+                if os.path.exists(qr_path):
+                    os.remove(qr_path)
 
                 # 保存新二维码
                 try:
@@ -175,6 +181,10 @@ class QQMusicAPI:
 
                 # 读取二维码文件并转换为base64
                 try:
+                    if not os.path.isfile(qr_path):
+                        logger.error(f"二维码文件不存在或不是文件: {qr_path}")
+                        return False
+                        
                     with open(qr_path, "rb") as f:
                         qr_base64 = base64.b64encode(f.read()).decode()
                         logger.info("请复制以下链接到浏览器打开二维码:")
