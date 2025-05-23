@@ -916,7 +916,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result(status)
 
     @filter.command("唱", alias={"牢剑唱", "转换"})
-    async def convert_voice(self, event: AstrMessageEvent):
+    async def convert_voice(self, event: AstrMessageEvent, *args):
         """转换语音
 
         用法：
