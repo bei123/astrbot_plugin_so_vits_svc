@@ -382,9 +382,6 @@ class QQMusicAPI:
 
         # 获取音质信息
         file_types = [
-            song.SongFileType.MASTER,
-            song.SongFileType.ATMOS_2,
-            song.SongFileType.ATMOS_51,
             song.SongFileType.FLAC,
             song.SongFileType.OGG_640,
             song.SongFileType.OGG_320,
