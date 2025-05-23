@@ -279,9 +279,6 @@ class QQMusicAPI:
             # 如果未指定音质类型，则尝试不同音质
             if file_type is None:
                 file_types = [
-                    song.SongFileType.MASTER,    # 臻品母带
-                    song.SongFileType.ATMOS_2,   # 臻品全景声
-                    song.SongFileType.ATMOS_51,  # 臻品音质
                     song.SongFileType.FLAC,      # 无损
                     song.SongFileType.OGG_640,   # 640kbps
                     song.SongFileType.OGG_320,   # 320kbps
