@@ -325,9 +325,6 @@ class QQMusicAPI:
             音质名称
         """
         quality_map = {
-            song.SongFileType.MASTER: "臻品母带",
-            song.SongFileType.ATMOS_2: "臻品全景声",
-            song.SongFileType.ATMOS_51: "臻品音质",
             song.SongFileType.FLAC: "无损",
             song.SongFileType.OGG_640: "640kbps",
             song.SongFileType.OGG_320: "320kbps",
@@ -349,9 +346,6 @@ class QQMusicAPI:
             文件扩展名
         """
         extension_map = {
-            song.SongFileType.MASTER: ".flac",
-            song.SongFileType.ATMOS_2: ".flac",
-            song.SongFileType.ATMOS_51: ".flac",
             song.SongFileType.FLAC: ".flac",
             song.SongFileType.OGG_640: ".ogg",
             song.SongFileType.OGG_320: ".ogg",

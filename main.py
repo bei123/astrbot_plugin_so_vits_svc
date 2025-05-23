@@ -724,7 +724,7 @@ class VoiceConverter:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.2.6",
+    version="1.2.7",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
