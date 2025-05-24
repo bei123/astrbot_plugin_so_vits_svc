@@ -1,5 +1,5 @@
 name: so-vits-svc-api # 这是你的插件的唯一识别名。
 desc: 支持从网易云，哔哩哔哩，QQ音乐，下载音乐进行AI翻唱，（自动去除伴奏与混音的插件）
-version: v1.2.8 # 插件版本号。格式：v1.1.1 或者 v1.1
+version: v1.2.9 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: bei # 作者
 repo: https://github.com/bei123/so-vits-svc-api # 插件的仓库地址

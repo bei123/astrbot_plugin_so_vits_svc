@@ -724,7 +724,7 @@ class VoiceConverter:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.2.8",
+    version="1.2.9",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -1139,25 +1139,17 @@ class SoVitsSvcPlugin(Star):
                 "f0_filter": self.converter.default_f0_filter,
                 "f0_predictor": self.converter.default_f0_predictor,
                 "enhancer_adaptive_key": self.converter.default_enhancer_adaptive_key,
-                "cr_threshold": self.converter.default_cr_threshold
+                "cr_threshold": self.converter.default_cr_threshold,
+                "enable_mixing": self.converter.enable_mixing  # 添加混音标志
             }
 
-            # 根据是否混音决定缓存文件
-            if self.converter.enable_mixing:
-                cached_file = self.converter.cache_manager.get_cache(
-                    input_file,
-                    speaker_id,
-                    pitch_adjust,
-                    **cache_params
-                )
-            else:
-                # 不混音时,缓存转换后的人声文件
-                cached_file = self.converter.cache_manager.get_cache(
-                    vocal_file,  # 使用分离后的人声文件作为缓存键
-                    speaker_id,
-                    pitch_adjust,
-                    **cache_params
-                )
+            # 获取缓存
+            cached_file = self.converter.cache_manager.get_cache(
+                input_file,  # 使用原始输入文件
+                speaker_id,
+                pitch_adjust,
+                **cache_params
+            )
 
             if cached_file:
                 logger.info(f"使用缓存: {cached_file}")
@@ -1280,8 +1272,8 @@ class SoVitsSvcPlugin(Star):
 
                 # 保存混音后的文件到缓存
                 self.converter.cache_manager.save_cache(
-                    input_file,
-                    mixed_file,
+                    input_file,  # 使用原始输入文件
+                    mixed_file,  # 缓存混音后的文件
                     speaker_id,
                     pitch_adjust,
                     **cache_params
@@ -1294,7 +1286,7 @@ class SoVitsSvcPlugin(Star):
             else:
                 # 如果不混音，保存转换后的人声到缓存
                 self.converter.cache_manager.save_cache(
-                    vocal_file,  # 使用分离后的人声文件作为缓存键
+                    input_file,  # 使用原始输入文件
                     output_file,  # 缓存转换后的人声文件
                     speaker_id,
                     pitch_adjust,
