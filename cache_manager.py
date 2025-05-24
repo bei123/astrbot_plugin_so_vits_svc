@@ -68,6 +68,11 @@ class CacheManager:
             缓存键
         """
         try:
+            # 检查文件是否存在
+            if not os.path.exists(input_file):
+                logger.error(f"输入文件不存在: {input_file}")
+                return None
+
             # 读取文件内容的前1MB用于计算哈希
             with open(input_file, "rb") as f:
                 file_content = f.read(1024*1024)
