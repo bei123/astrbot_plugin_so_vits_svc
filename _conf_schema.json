@@ -28,6 +28,12 @@
                 "hint": "MSST 处理使用的预设文件路径",
                 "default": "wav.json"
             },
+            "model_dir": {
+                "description": "默认模型目录",
+                "type": "string",
+                "hint": "默认使用的模型目录名称，需要在model目录下存在对应的模型文件",
+                "default": "default"
+            },
             "netease_cookie": {
                 "description": "网易云音乐Cookie",
                 "type": "string",

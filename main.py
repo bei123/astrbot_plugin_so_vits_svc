@@ -214,6 +214,22 @@ class MSSTProcessor:
             logger.error(f"下载文件出错: {str(e)}")
             return False
 
+    async def get_available_models(self) -> Optional[List[str]]:
+        """获取可用的模型列表
+
+        Returns:
+            模型列表，失败返回 None
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.api_url}/models") as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return result.get("models", [])
+                    return None
+        except Exception as e:
+            logger.error(f"获取模型列表失败: {str(e)}")
+            return None
 
 class VoiceConverter:
     """语音转换器"""
@@ -241,6 +257,7 @@ class VoiceConverter:
         self.api_url = self.base_setting.get("base_url", "http://localhost:1145")
         self.msst_url = self.base_setting.get("msst_url", "http://localhost:9000")
         self.msst_preset = self.base_setting.get("msst_preset", "wav.json")
+        self.model_dir = self.base_setting.get("model_dir", "default")  # 添加模型目录配置
         self.timeout = self.base_setting.get("timeout", 300)
 
         # 语音转换设置
@@ -482,7 +499,15 @@ class VoiceConverter:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.api_url}/health") as response:
-                    return await response.json()
+                    if response.status == 200:
+                        result = await response.json()
+                        return {
+                            "status": result.get("status"),
+                            "queue_size": result.get("queue_size", 0),
+                            "active_tasks": result.get("active_tasks", 0),
+                            "cached_models": result.get("cached_models", 0)
+                        }
+                    return None
         except Exception as e:
             logger.error(f"健康检查失败: {str(e)}")
             return None
@@ -611,10 +636,6 @@ class VoiceConverter:
                 logger.error("服务未就绪")
                 return False
 
-            if not health.get("model_loaded"):
-                logger.error("模型未加载")
-                return False
-
             if health.get("queue_size", 0) >= self.max_queue_size:
                 logger.error("服务器任务队列已满")
                 return False
@@ -635,6 +656,7 @@ class VoiceConverter:
                          audio_data,
                          filename="input.wav",
                          content_type="audio/wav")
+            data.add_field("model_dir", self.model_dir)
             data.add_field("tran", str(pitch_adjust))
             data.add_field("spk", str(speaker_id))
             data.add_field("wav_format", "wav")
@@ -724,7 +746,7 @@ class VoiceConverter:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.2.9",
+    version="1.3.0",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -786,6 +808,12 @@ class SoVitsSvcPlugin(Star):
                                 "type": "string",
                                 "hint": "MSST 处理使用的预设文件路径",
                                 "default": "wav.json",
+                            },
+                            "model_dir": {
+                                "description": "默认模型目录",
+                                "type": "string",
+                                "hint": "默认使用的模型目录名称",
+                                "default": "default",
                             },
                             "netease_cookie": {
                                 "description": "网易云音乐Cookie",
@@ -1358,40 +1386,32 @@ class SoVitsSvcPlugin(Star):
         args = message.split()[1:] if message else []
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.converter.api_url}/speakers",
-                    timeout=self.converter.timeout
-                ) as response:
-                    if response.status != 200:
-                        yield event.plain_result("获取说话人列表失败！")
-                        return
+            # 获取可用模型列表
+            models = await self.converter.get_available_models()
+            if not models:
+                yield event.plain_result("获取模型列表失败！")
+                return
 
-                    speakers = await response.json()
-                    if not speakers:
-                        yield event.plain_result("当前没有可用的说话人")
-                        return
+            if len(args) > 0:
+                speaker_id = args[0]
+                if speaker_id not in models:
+                    yield event.plain_result(f"说话人 {speaker_id} 不存在！")
+                    return
 
-                    if len(args) > 0:
-                        speaker_id = args[0]
-                        if speaker_id not in speakers:
-                            yield event.plain_result(f"说话人 {speaker_id} 不存在！")
-                            return
+                self.converter.default_speaker = speaker_id
+                self.config["voice_config"]["default_speaker"] = speaker_id
+                self.config.save_config()
+                yield event.plain_result(f"已将默认说话人设置为: {speaker_id}")
+                return
 
-                        self.converter.default_speaker = speaker_id
-                        self.config["voice_config"]["default_speaker"] = speaker_id
-                        self.config.save_config()
-                        yield event.plain_result(f"已将默认说话人设置为: {speaker_id}")
-                        return
+            speaker_info = "下面列出了可用的说话人列表:\n"
+            for i, speaker in enumerate(models, 1):
+                speaker_info += f"{i}. {speaker}\n"
 
-                    speaker_info = "下面列出了可用的说话人列表:\n"
-                    for i, speaker in enumerate(speakers, 1):
-                        speaker_info += f"{i}. {speaker}\n"
+            speaker_info += f"\n当前默认说话人: [{self.converter.default_speaker}]\n"
+            speaker_info += "Tips: 使用 /svc_speakers <说话人ID>，即可设置默认说话人"
 
-                    speaker_info += f"\n当前默认说话人: [{self.converter.default_speaker}]\n"
-                    speaker_info += "Tips: 使用 /svc_speakers <说话人ID>，即可设置默认说话人"
-
-                    yield event.plain_result(speaker_info)
+            yield event.plain_result(speaker_info)
 
         except Exception as e:
             yield event.plain_result(f"获取说话人列表失败：{str(e)}")
@@ -1538,3 +1558,46 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             logger.error(f"获取QQ音乐歌曲信息出错: {str(e)}")
             yield event.plain_result(f"获取QQ音乐歌曲信息时出错：{str(e)}")
+
+    @permission_type(PermissionType.ADMIN)
+    @command("svc_models", alias=["模型列表"])
+    async def show_models(self, event: AstrMessageEvent):
+        """展示当前可用的模型列表，支持切换默认模型目录
+
+        用法：/svc_models [模型目录名]
+        示例：/svc_models - 显示模型列表
+              /svc_models default - 设置默认模型目录为default
+        """
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []
+
+        try:
+            # 获取可用模型列表
+            models = await self.converter.get_available_models()
+            if not models:
+                yield event.plain_result("获取模型列表失败！")
+                return
+
+            if len(args) > 0:
+                model_dir = args[0]
+                if model_dir not in models:
+                    yield event.plain_result(f"模型目录 {model_dir} 不存在！")
+                    return
+
+                self.converter.model_dir = model_dir
+                self.config["base_setting"]["model_dir"] = model_dir
+                self.config.save_config()
+                yield event.plain_result(f"已将默认模型目录设置为: {model_dir}")
+                return
+
+            model_info = "下面列出了可用的模型目录:\n"
+            for i, model in enumerate(models, 1):
+                model_info += f"{i}. {model}\n"
+
+            model_info += f"\n当前默认模型目录: [{self.converter.model_dir}]\n"
+            model_info += "Tips: 使用 /svc_models <模型目录名>，即可设置默认模型目录"
+
+            yield event.plain_result(model_info)
+
+        except Exception as e:
+            yield event.plain_result(f"获取模型列表失败：{str(e)}")
