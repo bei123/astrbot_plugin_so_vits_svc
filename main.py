@@ -545,6 +545,7 @@ class VoiceConverter:
         f0_predictor: Optional[str] = None,
         enhancer_adaptive_key: Optional[int] = None,
         cr_threshold: Optional[float] = None,
+        model_dir: Optional[str] = None,
     ) -> bool:
         """异步转换语音"""
         async with self.task_lock:  # 使用锁确保同一时间只有一个任务在执行
@@ -571,6 +572,7 @@ class VoiceConverter:
                     f0_predictor,
                     enhancer_adaptive_key,
                     cr_threshold,
+                    model_dir,
                 )
 
                 if not success:
@@ -612,6 +614,7 @@ class VoiceConverter:
         f0_predictor: Optional[str] = None,
         enhancer_adaptive_key: Optional[int] = None,
         cr_threshold: Optional[float] = None,
+        model_dir: Optional[str] = None,
     ) -> bool:
         """转换语音"""
         try:
@@ -639,6 +642,7 @@ class VoiceConverter:
             f0_predictor = f0_predictor or self.default_f0_predictor
             enhancer_adaptive_key = enhancer_adaptive_key if enhancer_adaptive_key is not None else self.default_enhancer_adaptive_key
             cr_threshold = cr_threshold if cr_threshold is not None else self.default_cr_threshold
+            model_dir = model_dir or self.model_dir
 
             # 检查输入文件
             if not os.path.exists(input_wav):
@@ -673,7 +677,7 @@ class VoiceConverter:
                          audio_data,
                          filename="input.wav",
                          content_type="audio/wav")
-            data.add_field("model_dir", self.model_dir)
+            data.add_field("model_dir", model_dir)
             data.add_field("tran", str(pitch_adjust))
             data.add_field("spk", str(speaker_id))
             data.add_field("wav_format", "wav")
@@ -762,7 +766,7 @@ class VoiceConverter:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.3.0",
+    version="1.3.1",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -968,6 +972,7 @@ class SoVitsSvcPlugin(Star):
             2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
             3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
             4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索并转换QQ音乐
+            5. /convert_voice [说话人ID] [音调调整] [歌曲名] model [模型目录] - 使用指定模型目录转换（可选）
         """
         try:
             # 解析参数
@@ -977,6 +982,7 @@ class SoVitsSvcPlugin(Star):
             pitch_adjust = None
             song_name = None
             source_type = "file"  # 默认为文件上传
+            model_dir = None  # 默认使用配置中的模型目录
 
             if len(args) >= 2:
                 speaker_id = args[0]
@@ -999,7 +1005,20 @@ class SoVitsSvcPlugin(Star):
                         if len(args) > 3:
                             song_name = " ".join(args[3:])
                     else:
-                        song_name = " ".join(args[2:])
+                        # 检查是否在参数中指定了模型目录
+                        model_index = -1
+                        for i, arg in enumerate(args):
+                            if arg.lower() == "model" and i + 1 < len(args):
+                                model_index = i
+                                break
+                        
+                        if model_index != -1:
+                            # 如果找到了model参数，提取模型目录和歌曲名
+                            model_dir = args[model_index + 1]
+                            song_name = " ".join(args[2:model_index])
+                        else:
+                            # 如果没有找到model参数，整个剩余部分都是歌曲名
+                            song_name = " ".join(args[2:])
 
             # 生成临时文件路径
             input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
@@ -1097,6 +1116,17 @@ class SoVitsSvcPlugin(Star):
                     return
             elif song_name:
                 try:
+                    # 如果指定了模型目录，验证其是否存在
+                    if model_dir:
+                        models = await self.converter.get_available_models()
+                        if not models:
+                            yield event.plain_result("获取模型列表失败！")
+                            return
+                        
+                        if model_dir not in models:
+                            yield event.plain_result(f"模型目录 {model_dir} 不存在！")
+                            return
+
                     yield event.plain_result(f"正在搜索歌曲：{song_name}...")
                     song_info = await self.converter.netease_api.get_song_with_highest_quality(
                         song_name
@@ -1112,12 +1142,15 @@ class SoVitsSvcPlugin(Star):
                         )
                         return
 
-                    yield event.plain_result(
+                    result_msg = (
                         f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
                         f"音质：{song_info.get('level', '未知音质')}\n"
                         f"大小：{song_info.get('size', '未知大小')}\n"
-                        f"正在下载..."
                     )
+                    if model_dir:
+                        result_msg += f"使用模型目录：{model_dir}\n"
+                    result_msg += "正在下载..."
+                    yield event.plain_result(result_msg)
 
                     downloaded_file = await self.converter.netease_api.download_song(
                         song_info, self.temp_dir
@@ -1133,11 +1166,9 @@ class SoVitsSvcPlugin(Star):
                         return
 
                 except Exception as e:
-                    logger.error(f"处理网易云音乐时出错: {str(e)}")
+                    logger.error(f"处理歌曲时出错: {str(e)}")
                     yield event.plain_result(f"搜索/下载歌曲时出错：{str(e)}")
                     return
-
-            # 否则检查是否有上传的音频文件
             else:
                 if (
                     not hasattr(event.message_obj, "files")
@@ -1149,7 +1180,8 @@ class SoVitsSvcPlugin(Star):
                         "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
                         "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
                         "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
-                        "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索QQ音乐"
+                        "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] - 搜索QQ音乐\n"
+                        "5. /convert_voice [说话人ID] [音调调整] [歌曲名] model [模型目录] - 使用指定模型目录转换（可选）"
                     )
                     return
 
@@ -1279,7 +1311,8 @@ class SoVitsSvcPlugin(Star):
                         f0_filter=self.converter.default_f0_filter,
                         f0_predictor=self.converter.default_f0_predictor,
                         enhancer_adaptive_key=self.converter.default_enhancer_adaptive_key,
-                        cr_threshold=self.converter.default_cr_threshold
+                        cr_threshold=self.converter.default_cr_threshold,
+                        model_dir=model_dir,
                     )
                 )
 
