@@ -296,6 +296,23 @@ class VoiceConverter:
             max_cache_age=cache_config.get("max_cache_age", 7*24*60*60)  # 默认7天
         )
 
+    async def get_available_models(self) -> Optional[List[str]]:
+        """获取可用的模型列表
+
+        Returns:
+            模型列表，失败返回 None
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.api_url}/models") as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return result.get("models", [])
+                    return None
+        except Exception as e:
+            logger.error(f"获取模型列表失败: {str(e)}")
+            return None
+
     def _load_audio(self, path: str) -> np.ndarray:
         """加载音频文件
 
@@ -740,7 +757,6 @@ class VoiceConverter:
         except Exception as e:
             logger.error(f"转换过程中发生错误: {str(e)}")
             return False
-
 
 @register(
     name="so-vits-svc-api",
