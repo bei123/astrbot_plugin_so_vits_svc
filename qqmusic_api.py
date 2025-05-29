@@ -179,7 +179,7 @@ class QQMusicAPI:
                     if not os.path.isfile(qr_path):
                         logger.error(f"二维码文件不存在或不是文件: {qr_path}")
                         return False
-                        
+
                     with open(qr_path, "rb") as f:
                         qr_base64 = base64.b64encode(f.read()).decode()
                         base64_url = f"data:image/png;base64,{qr_base64}"

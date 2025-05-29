@@ -6,7 +6,7 @@ So-Vits-SVC API 插件
 提供语音转换、MSST音频处理和网易云音乐下载功能
 """
 
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 import os
 import time
 import uuid
@@ -29,6 +29,8 @@ from astrbot.api.event import filter
 from pedalboard import Pedalboard, Mix, Gain, HighpassFilter, PeakFilter, HighShelfFilter, Delay, Invert, Compressor, Reverb, Limiter
 from pedalboard.io import AudioFile
 import numpy as np
+import psutil
+import traceback
 
 class MSSTProcessor:
     """MSST 音频处理器"""
@@ -322,90 +324,125 @@ class VoiceConverter:
         Returns:
             音频数据
         """
-        with AudioFile(path).resampled_to(self.sample_rate) as audio:
-            data = audio.read(audio.frames)
-        return data
+        try:
+            # 检查文件大小和内存
+            file_size = os.path.getsize(path)
+            is_safe, memory_warning = check_memory_safe(file_size)
+            if not is_safe:
+                raise MemoryError(memory_warning)
+
+            with AudioFile(path).resampled_to(self.sample_rate) as audio:
+                data = audio.read(audio.frames)
+
+                # 检查加载后的数据大小
+                data_size = data.nbytes
+                is_safe, memory_warning = check_memory_safe(data_size)
+                if not is_safe:
+                    raise MemoryError(memory_warning)
+
+                return data
+        except Exception as e:
+            logger.error(f"加载音频文件失败: {str(e)}\n{traceback.format_exc()}")
+            raise
 
     def _process_vocal(self, audio: np.ndarray, release: int = 300, fb: int = 180) -> np.ndarray:
-        """处理人声
+        """处理人声"""
+        try:
+            # 检查处理前的数据大小
+            data_size = audio.nbytes
+            is_safe, memory_warning = check_memory_safe(data_size)
+            if not is_safe:
+                raise MemoryError(memory_warning)
 
-        Args:
-            audio: 输入音频数据
-            release: 压缩器释放时间
-            fb: 压缩器反馈时间
+            vocal_board = Pedalboard([
+                Gain(self.voc_input),
+                HighpassFilter(230),
+                PeakFilter(2700, -2, 1),
+                HighShelfFilter(20000, -2, 1.8),
+                Gain(1),
+                PeakFilter(1400, 3, 1.15),
+                PeakFilter(8500, 2.5, 1),
+                Gain(-1),
+                Mix([
+                    Gain(0),
+                    Pedalboard([
+                        Invert(),
+                        Compressor(-30, 3.2, 40, fb),
+                        Gain(-40)
+                    ])
+                ]),
+                Compressor(-18, 2.5, 19, release),
+                Gain(0)
+            ])
 
-        Returns:
-            处理后的音频数据
-        """
-        vocal_board = Pedalboard([
-            Gain(self.voc_input),
-            HighpassFilter(230),
-            PeakFilter(2700, -2, 1),
-            HighShelfFilter(20000, -2, 1.8),
-            Gain(1),
-            PeakFilter(1400, 3, 1.15),
-            PeakFilter(8500, 2.5, 1),
-            Gain(-1),
-            Mix([
-                Gain(0),
-                Pedalboard([
-                    Invert(),
-                    Compressor(-30, 3.2, 40, fb),
-                    Gain(-40)
-                ])
-            ]),
-            Compressor(-18, 2.5, 19, release),
-            Gain(0)
-        ])
-        return vocal_board(audio, self.sample_rate)
+            processed = vocal_board(audio, self.sample_rate)
+
+            # 检查处理后的数据大小
+            processed_size = processed.nbytes
+            is_safe, memory_warning = check_memory_safe(processed_size)
+            if not is_safe:
+                raise MemoryError(memory_warning)
+
+            return processed
+        except Exception as e:
+            logger.error(f"处理人声失败: {str(e)}\n{traceback.format_exc()}")
+            raise
 
     def _process_reverb(self, audio: np.ndarray, s: int = 5, m: int = 25, long_time: int = 50, d: int = 200) -> np.ndarray:
-        """添加混响效果
+        """添加混响效果"""
+        try:
+            # 检查处理前的数据大小
+            data_size = audio.nbytes
+            is_safe, memory_warning = check_memory_safe(data_size)
+            if not is_safe:
+                raise MemoryError(memory_warning)
 
-        Args:
-            audio: 输入音频数据
-            s: 短混响时间
-            m: 中混响时间
-            long_time: 长混响时间
-            d: 延迟时间
+            delay = Pedalboard([
+                Gain(-20),
+                Delay(d/8, 0, 1),
+                Gain(-12),
+            ])
 
-        Returns:
-            处理后的音频数据
-        """
-        delay = Pedalboard([
-            Gain(-20),
-            Delay(d/8, 0, 1),
-            Gain(-12),
-        ])
+            short = Pedalboard([
+                Gain(-20),
+                Delay(s/1000, 0, 1),
+                Reverb(0.2, 0.35, 1, 0, 1, 0),
+                Gain(-12),
+            ])
 
-        short = Pedalboard([
-            Gain(-20),
-            Delay(s/1000, 0, 1),
-            Reverb(0.2, 0.35, 1, 0, 1, 0),
-            Gain(-12),
-        ])
+            medium = Pedalboard([
+                Gain(-16),
+                Delay(m/1000, 0.3, 1),
+                Reverb(0.45, 0.55, 1, 0, 1, 0),
+                Gain(-19),
+            ])
 
-        medium = Pedalboard([
-            Gain(-16),
-            Delay(m/1000, 0.3, 1),
-            Reverb(0.45, 0.55, 1, 0, 1, 0),
-            Gain(-19),
-        ])
+            long = Pedalboard([
+                Gain(-12),
+                Delay(long_time/1000, 0.6, 1),
+                Reverb(0.6, 0.7, 1, 0, 1, 0),
+                Gain(-23)
+            ])
 
-        long = Pedalboard([
-            Gain(-12),
-            Delay(long_time/1000, 0.6, 1),
-            Reverb(0.6, 0.7, 1, 0, 1, 0),
-            Gain(-23)
-        ])
+            reverb_board = Pedalboard([
+                Mix([short, medium, long, delay]),
+                PeakFilter(1450, -4, 1.83),
+                PeakFilter(2300, 5, 0.51),
+                Gain(self.revb_gain),
+            ])
 
-        reverb_board = Pedalboard([
-            Mix([short, medium, long, delay]),
-            PeakFilter(1450, -4, 1.83),
-            PeakFilter(2300, 5, 0.51),
-            Gain(self.revb_gain),
-        ])
-        return reverb_board(audio, self.sample_rate)
+            processed = reverb_board(audio, self.sample_rate)
+
+            # 检查处理后的数据大小
+            processed_size = processed.nbytes
+            is_safe, memory_warning = check_memory_safe(processed_size)
+            if not is_safe:
+                raise MemoryError(memory_warning)
+
+            return processed
+        except Exception as e:
+            logger.error(f"添加混响效果失败: {str(e)}\n{traceback.format_exc()}")
+            raise
 
     def _process_instrument(self, audio: np.ndarray) -> np.ndarray:
         """处理伴奏
@@ -438,27 +475,17 @@ class VoiceConverter:
         return master_board(audio, self.sample_rate)
 
     def mix_audio(self, vocal_path: str, inst_path: str, output_path: str) -> bool:
-        """混合人声和伴奏
-
-        Args:
-            vocal_path: 人声音频路径
-            inst_path: 伴奏音频路径
-            output_path: 输出音频路径
-
-        Returns:
-            是否成功
-        """
+        """混合人声和伴奏"""
         try:
-            # 确保输出目录存在
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            # 检查输入文件大小
+            vocal_size = os.path.getsize(vocal_path)
+            inst_size = os.path.getsize(inst_path)
 
-            # 检查输入文件是否存在
-            if not os.path.exists(vocal_path):
-                logger.error(f"人声音频文件不存在: {vocal_path}")
-                return False
-
-            if not os.path.exists(inst_path):
-                logger.error(f"伴奏音频文件不存在: {inst_path}")
+            # 检查总输入大小
+            total_input_size = vocal_size + inst_size
+            is_safe, memory_warning = check_memory_safe(total_input_size)
+            if not is_safe:
+                logger.error(f"混音内存不足: {memory_warning}")
                 return False
 
             # 加载音频
@@ -485,9 +512,23 @@ class VoiceConverter:
             min_length = min(processed_vocal.shape[1], processed_inst.shape[1])
             combined = processed_vocal[:, :min_length] + processed_inst[:, :min_length] + reverb_vocal[:, :min_length]
 
+            # 检查混合后的数据大小
+            combined_size = combined.nbytes
+            is_safe, memory_warning = check_memory_safe(combined_size)
+            if not is_safe:
+                logger.error(f"混合音频内存不足: {memory_warning}")
+                return False
+
             # 母带处理
             logger.info("母带处理...")
             final = self._process_master(combined)
+
+            # 检查最终数据大小
+            final_size = final.nbytes
+            is_safe, memory_warning = check_memory_safe(final_size)
+            if not is_safe:
+                logger.error(f"母带处理内存不足: {memory_warning}")
+                return False
 
             # 输出
             logger.info(f"保存混合后的音频: {output_path}")
@@ -500,11 +541,16 @@ class VoiceConverter:
             ) as output:
                 output.write(final)
 
+            # 清理内存
+            del vocal, inst, processed_vocal, stereo_vocal, reverb_vocal, processed_inst, combined, final
+            import gc
+            gc.collect()
+
             logger.info("混音处理完成")
             return True
 
         except Exception as e:
-            logger.error(f"混音处理失败: {str(e)}")
+            logger.error(f"混音处理失败: {str(e)}\n{traceback.format_exc()}")
             return False
 
     async def check_health(self) -> Optional[Dict]:
@@ -620,6 +666,13 @@ class VoiceConverter:
         try:
             logger.info(f"开始语音转换流程，输入文件: {input_wav}, 输出文件: {output_wav}")
 
+            # 检查输入文件大小
+            input_size = os.path.getsize(input_wav)
+            is_safe, memory_warning = check_memory_safe(input_size)
+            if not is_safe:
+                logger.error(f"转换语音内存不足: {memory_warning}")
+                return False
+
             # 确保临时目录存在
             output_dir = os.path.dirname(output_wav)
             try:
@@ -667,8 +720,15 @@ class VoiceConverter:
                 with open(input_wav, "rb") as f:
                     audio_data = f.read()
                 logger.info(f"成功读取音频文件，大小: {len(audio_data)} 字节")
+
+                # 检查读取后的数据大小
+                is_safe, memory_warning = check_memory_safe(len(audio_data))
+                if not is_safe:
+                    logger.error(f"读取音频文件内存不足: {memory_warning}")
+                    return False
+
             except Exception as e:
-                logger.error(f"读取音频文件失败: {str(e)}")
+                logger.error(f"读取音频文件失败: {str(e)}\n{traceback.format_exc()}")
                 return False
 
             # 准备表单数据
@@ -759,14 +819,53 @@ class VoiceConverter:
                 return False
 
         except Exception as e:
-            logger.error(f"转换过程中发生错误: {str(e)}")
+            logger.error(f"转换过程中发生错误: {str(e)}\n{traceback.format_exc()}")
             return False
+
+def get_memory_info() -> Tuple[float, float, float]:
+    """获取内存使用情况
+
+    Returns:
+        Tuple[float, float, float]: (总内存GB, 已用内存GB, 可用内存GB)
+    """
+    mem = psutil.virtual_memory()
+    return (
+        mem.total / (1024 * 1024 * 1024),  # 总内存(GB)
+        mem.used / (1024 * 1024 * 1024),   # 已用内存(GB)
+        mem.available / (1024 * 1024 * 1024)  # 可用内存(GB)
+    )
+
+def check_memory_safe(file_size: int) -> Tuple[bool, str]:
+    """检查内存是否足够处理文件
+
+    Args:
+        file_size: 文件大小(字节)
+
+    Returns:
+        Tuple[bool, str]: (是否安全, 错误信息)
+    """
+    total, used, available = get_memory_info()
+    estimated_memory = file_size * 2 / (1024 * 1024 * 1024)  # 预估所需内存(GB)
+
+    if available < estimated_memory * 1.5:  # 预留1.5倍空间
+        return False, (
+            f"内存不足！\n"
+            f"系统总内存: {total:.1f}GB\n"
+            f"已用内存: {used:.1f}GB\n"
+            f"可用内存: {available:.1f}GB\n"
+            f"预估需要: {estimated_memory:.1f}GB\n"
+            f"建议：\n"
+            f"1. 等待其他任务完成\n"
+            f"2. 缩短音频长度\n"
+            f"3. 降低音频质量"
+        )
+    return True, ""
 
 @register(
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.3.1",
+    version="1.3.2",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -965,15 +1064,7 @@ class SoVitsSvcPlugin(Star):
 
     @filter.command("唱", alias={"牢剑唱", "转换"})
     async def convert_voice(self, event: AstrMessageEvent):
-        """转换语音
-
-        用法：
-            1. /convert_voice [说话人ID] [音调调整] - 上传音频文件进行转换
-            2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索并转换网易云音乐
-            3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频
-            4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] -m [模型目录] - 搜索并转换QQ音乐（可选指定模型目录）
-            5. /convert_voice [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）
-        """
+        """转换语音"""
         try:
             # 解析参数
             message = event.message_str.strip()
@@ -1005,7 +1096,7 @@ class SoVitsSvcPlugin(Star):
                                 if arg == "-m" and i + 1 < len(args):
                                     model_index = i
                                     break
-                            
+
                             if model_index != -1:
                                 # 如果找到了-m参数，提取模型目录和BV号
                                 model_dir = args[model_index + 1]
@@ -1022,7 +1113,7 @@ class SoVitsSvcPlugin(Star):
                                 if arg == "-m" and i + 1 < len(args):
                                     model_index = i
                                     break
-                            
+
                             if model_index != -1:
                                 # 如果找到了-m参数，提取模型目录和歌曲名
                                 model_dir = args[model_index + 1]
@@ -1037,7 +1128,7 @@ class SoVitsSvcPlugin(Star):
                             if arg == "-m" and i + 1 < len(args):
                                 model_index = i
                                 break
-                        
+
                         if model_index != -1:
                             # 如果找到了-m参数，提取模型目录和歌曲名
                             model_dir = args[model_index + 1]
@@ -1148,7 +1239,7 @@ class SoVitsSvcPlugin(Star):
                         if not models:
                             yield event.plain_result("获取模型列表失败！")
                             return
-                        
+
                         if model_dir not in models:
                             yield event.plain_result(f"模型目录 {model_dir} 不存在！")
                             return
@@ -1382,10 +1473,63 @@ class SoVitsSvcPlugin(Star):
                     **cache_params
                 )
 
-                # 发送结果
-                yield event.plain_result("处理完成！正在发送文件...")
-                chain = [Record.fromFileSystem(mixed_file)]
-                yield event.chain_result(chain)
+                # 在发送结果之前添加内存检查
+                if self.converter.enable_mixing:
+                    final_file = mixed_file
+                else:
+                    final_file = output_file
+
+                # 检查文件大小和内存使用情况
+                try:
+                    file_size = os.path.getsize(final_file)
+                    if file_size == 0:
+                        yield event.plain_result("错误：生成的文件大小为0，请检查转换过程")
+                        return
+
+                    is_safe, memory_warning = check_memory_safe(file_size)
+                    if not is_safe:
+                        yield event.plain_result(memory_warning)
+                        return
+
+                    # 使用异步方式读取文件
+                    try:
+                        with open(final_file, "rb") as f:
+                            audio_data = f.read()
+
+                        # 再次检查内存
+                        is_safe, memory_warning = check_memory_safe(len(audio_data))
+                        if not is_safe:
+                            yield event.plain_result(memory_warning)
+                            return
+
+                        # 发送结果
+                        yield event.plain_result("处理完成！正在发送文件...")
+                        chain = [Record.fromFileSystem(final_file)]
+                        yield event.chain_result(chain)
+
+                        # 立即清理内存
+                        del audio_data
+                        import gc
+                        gc.collect()
+
+                    except MemoryError as e:
+                        logger.error(f"内存不足: {str(e)}")
+                        yield event.plain_result("内存不足，无法处理文件。请尝试缩短音频长度或降低音质。")
+                        return
+                    except IOError as e:
+                        logger.error(f"文件读写错误: {str(e)}")
+                        yield event.plain_result(f"文件读写错误: {str(e)}")
+                        return
+                    except Exception as e:
+                        logger.error(f"发送音频文件时出错: {str(e)}\n{traceback.format_exc()}")
+                        yield event.plain_result(f"发送音频文件时出错: {str(e)}")
+                        return
+
+                except Exception as e:
+                    logger.error(f"检查文件时出错: {str(e)}\n{traceback.format_exc()}")
+                    yield event.plain_result(f"检查文件时出错: {str(e)}")
+                    return
+
             else:
                 # 如果不混音，保存转换后的人声到缓存
                 self.converter.cache_manager.save_cache(
@@ -1396,13 +1540,65 @@ class SoVitsSvcPlugin(Star):
                     **cache_params
                 )
 
-                # 发送结果
-                yield event.plain_result("处理完成！正在发送文件...")
-                chain = [Record.fromFileSystem(output_file)]
-                yield event.chain_result(chain)
+                # 在发送结果之前添加内存检查
+                if self.converter.enable_mixing:
+                    final_file = mixed_file
+                else:
+                    final_file = output_file
+
+                # 检查文件大小和内存使用情况
+                try:
+                    file_size = os.path.getsize(final_file)
+                    if file_size == 0:
+                        yield event.plain_result("错误：生成的文件大小为0，请检查转换过程")
+                        return
+
+                    is_safe, memory_warning = check_memory_safe(file_size)
+                    if not is_safe:
+                        yield event.plain_result(memory_warning)
+                        return
+
+                    # 使用异步方式读取文件
+                    try:
+                        with open(final_file, "rb") as f:
+                            audio_data = f.read()
+
+                        # 再次检查内存
+                        is_safe, memory_warning = check_memory_safe(len(audio_data))
+                        if not is_safe:
+                            yield event.plain_result(memory_warning)
+                            return
+
+                        # 发送结果
+                        yield event.plain_result("处理完成！正在发送文件...")
+                        chain = [Record.fromFileSystem(final_file)]
+                        yield event.chain_result(chain)
+
+                        # 立即清理内存
+                        del audio_data
+                        import gc
+                        gc.collect()
+
+                    except MemoryError as e:
+                        logger.error(f"内存不足: {str(e)}")
+                        yield event.plain_result("内存不足，无法处理文件。请尝试缩短音频长度或降低音质。")
+                        return
+                    except IOError as e:
+                        logger.error(f"文件读写错误: {str(e)}")
+                        yield event.plain_result(f"文件读写错误: {str(e)}")
+                        return
+                    except Exception as e:
+                        logger.error(f"发送音频文件时出错: {str(e)}\n{traceback.format_exc()}")
+                        yield event.plain_result(f"发送音频文件时出错: {str(e)}")
+                        return
+
+                except Exception as e:
+                    logger.error(f"检查文件时出错: {str(e)}\n{traceback.format_exc()}")
+                    yield event.plain_result(f"检查文件时出错: {str(e)}")
+                    return
 
         except Exception as e:
-            logger.error(f"处理过程中发生错误: {str(e)}")
+            logger.error(f"处理过程中发生错误: {str(e)}\n{traceback.format_exc()}")
             yield event.plain_result(f"处理过程中发生错误：{str(e)}")
         finally:
             # 清理任务
@@ -1413,8 +1609,11 @@ class SoVitsSvcPlugin(Star):
                 for file_path in [input_file, output_file, mixed_file, vocal_file, inst_file]:
                     if os.path.exists(file_path):
                         os.remove(file_path)
+                        # 强制释放文件句柄
+                        import gc
+                        gc.collect()
             except (OSError, IOError) as e:
-                logger.error(f"清理临时文件失败: {str(e)}")
+                logger.error(f"清理临时文件失败: {str(e)}\n{traceback.format_exc()}")
 
     @permission_type(PermissionType.ADMIN)
     @command("cancel_convert")
@@ -1441,7 +1640,7 @@ class SoVitsSvcPlugin(Star):
                     if os.path.exists(task_info["mixed_file"]):
                         os.remove(task_info["mixed_file"])
                 except (OSError, IOError) as e:
-                    logger.error(f"清理临时文件失败: {str(e)}")
+                    logger.error(f"清理临时文件失败: {str(e)}\n{traceback.format_exc()}")
                 del self.conversion_tasks[task_id]
                 yield event.plain_result("已取消转换任务")
                 return
@@ -1489,7 +1688,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(speaker_info)
 
         except Exception as e:
-            yield event.plain_result(f"获取说话人列表失败：{str(e)}")
+            yield event.plain_result(f"获取说话人列表失败：{str(e)}\n{traceback.format_exc()}")
 
     @permission_type(PermissionType.ADMIN)
     @command("svc_presets", alias=["预设列表"])
@@ -1513,7 +1712,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(preset_info)
 
         except Exception as e:
-            yield event.plain_result(f"获取预设列表失败：{str(e)}")
+            yield event.plain_result(f"获取预设列表失败：{str(e)}\n{traceback.format_exc()}")
 
     @command("bilibili_info")
     async def get_bilibili_info(self, event: AstrMessageEvent):
@@ -1570,7 +1769,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(result)
 
         except Exception as e:
-            logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}")
+            logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}\n{traceback.format_exc()}")
             yield event.plain_result(f"获取视频信息时出错：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
@@ -1581,7 +1780,7 @@ class SoVitsSvcPlugin(Star):
             self.converter.cache_manager.clear_cache()
             yield event.plain_result("缓存已清空")
         except Exception as e:
-            yield event.plain_result(f"清空缓存失败：{str(e)}")
+            yield event.plain_result(f"清空缓存失败：{str(e)}\n{traceback.format_exc()}")
 
     @command("qqmusic_info")
     async def get_qqmusic_info(self, event: AstrMessageEvent):
@@ -1631,7 +1830,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(result)
 
         except Exception as e:
-            logger.error(f"获取QQ音乐歌曲信息出错: {str(e)}")
+            logger.error(f"获取QQ音乐歌曲信息出错: {str(e)}\n{traceback.format_exc()}")
             yield event.plain_result(f"获取QQ音乐歌曲信息时出错：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
@@ -1675,4 +1874,4 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(model_info)
 
         except Exception as e:
-            yield event.plain_result(f"获取模型列表失败：{str(e)}")
+            yield event.plain_result(f"获取模型列表失败：{str(e)}\n{traceback.format_exc()}")
