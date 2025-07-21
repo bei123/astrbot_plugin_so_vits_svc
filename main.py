@@ -1378,7 +1378,7 @@ class SoVitsSvcPlugin(Star):
                         yield event.plain_result("副歌检测失败：" + str(chorus_result))
                         return
                 except Exception as e:
-                    yield event.plain_result(f"副歌检测或裁切出错：{str(e)}")
+                    yield event.plain_result(f"副歌检测或裁切出错：{str(e)}\n{traceback.format_exc()}")
                     return
 
             # 开始处理流程
