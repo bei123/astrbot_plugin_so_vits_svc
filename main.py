@@ -1364,6 +1364,7 @@ class SoVitsSvcPlugin(Star):
                     with open(input_file, "rb") as f:
                         audio_bytes = f.read()
                     volc_conf = self.config.get("volc_chorus", {})
+                    print("volc_conf:", volc_conf)  # 调试打印
                     chorus_result = await detect_chorus_api(audio_bytes, volc_conf)
                     if chorus_result.get("msg") == "success":
                         start = int(chorus_result["chorus"]["start"] * 1000)  # ms
