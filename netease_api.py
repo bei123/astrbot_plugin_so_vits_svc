@@ -312,26 +312,14 @@ class NeteaseMusicAPI:
         first_song = songs[0]
         song_id = first_song["id"]
 
-        # 3. 按音质从高到低尝试
-        qualities = [
-            "jymaster",
-            "jyeffect",
-            "sky",
-            "hires",
-            "lossless",
-            "exhigh",
-            "standard",
-        ]
-
+        # 优先尝试无损音质，兜底次高音质
+        qualities = ["lossless", "exhigh", "standard"]
         for quality in qualities:
             url_info = await self.get_song_url(song_id, quality)
-
             if url_info:
                 song_url = url_info["url"]
                 song_size = url_info["size"]
                 song_level = url_info["level"]
-
-                # 4. 返回结果
                 return {
                     "status": 200,
                     "id": song_id,
@@ -343,8 +331,7 @@ class NeteaseMusicAPI:
                     "size": self.format_size(song_size),
                     "url": song_url
                 }
-
-        print("获取歌曲详情失败")
+        print("获取无损及次高音质失败")
         return None
 
     async def download_song(self, song_info, save_path=None):
