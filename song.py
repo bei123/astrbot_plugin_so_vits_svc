@@ -8,11 +8,7 @@ import httpx
 import asyncio
 import sys
 
-# ========== 用户需填写 =============
-# ***REMOVED***
-# ***REMOVED***
-# appkey = "UyGuEnupum"
-# ===================================
+
 
 Service = "sami"
 Version = "2021-07-27"
