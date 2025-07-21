@@ -129,40 +129,34 @@ async def detect_chorus_api(audio_bytes, volc_conf):
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
     body = json.dumps({"data": audio_b64})
     url = f"https://sami.bytedance.com/api/v1/invoke?version=v4&token={token}&appkey={appkey}&namespace=DeepChorus"
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, data=body, headers={"Content-Type": "application/json"})
-    except httpx.ReadTimeout:
-        return {"msg": "副歌检测请求超时，请检查网络或稍后重试。"}
-    except httpx.RequestError as e:
-        return {"msg": f"副歌检测网络异常: {str(e)}"}
-    if resp.status_code != 200:
-        return {"msg": "副歌检测请求失败", "err": resp.text}
-    result = resp.json()
-    payload = result.get("payload")
-    if payload:
-        payload_json = json.loads(payload)
-        chorus_list = payload_json.get("chorus_segments")
-        if chorus_list and len(chorus_list) > 0:
-            best = max(chorus_list, key=lambda x: x.get("chorus_prob", 0))
-            interval = best.get("interval")
-            if interval and len(interval) == 2:
-                return {"msg": "success", "chorus": {"start": interval[0], "end": interval[1]}}
-            else:
-                return {"msg": "副歌区间格式异常", "raw": best}
-        else:
-            thumbnail = payload_json.get("thumbnail")
-            if thumbnail and len(thumbnail) > 0:
-                interval = thumbnail[0].get("interval")
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, data=body, headers={"Content-Type": "application/json"})
+        if resp.status_code != 200:
+            return {"msg": "副歌检测请求失败", "err": resp.text}
+        result = resp.json()
+        payload = result.get("payload")
+        if payload:
+            payload_json = json.loads(payload)
+            chorus_list = payload_json.get("chorus_segments")
+            if chorus_list and len(chorus_list) > 0:
+                best = max(chorus_list, key=lambda x: x.get("chorus_prob", 0))
+                interval = best.get("interval")
                 if interval and len(interval) == 2:
-                    return {"msg": "success", "chorus": {"start": interval[0], "end": interval[1], "type": "高潮区间"}}
+                    return {"msg": "success", "chorus": {"start": interval[0], "end": interval[1]}}
                 else:
-                    return {"msg": "高潮区间格式异常", "raw": thumbnail[0]}
+                    return {"msg": "副歌区间格式异常", "raw": best}
             else:
-                return {"msg": "未检测到明显的副歌区间"}
-    else:
-        return {"msg": "无payload返回", "raw": result}
+                thumbnail = payload_json.get("thumbnail")
+                if thumbnail and len(thumbnail) > 0:
+                    interval = thumbnail[0].get("interval")
+                    if interval and len(interval) == 2:
+                        return {"msg": "success", "chorus": {"start": interval[0], "end": interval[1], "type": "高潮区间"}}
+                    else:
+                        return {"msg": "高潮区间格式异常", "raw": thumbnail[0]}
+                else:
+                    return {"msg": "未检测到明显的副歌区间"}
+        else:
+            return {"msg": "无payload返回", "raw": result}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
