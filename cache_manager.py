@@ -235,3 +235,29 @@ class CacheManager:
 
         except Exception as e:
             logger.error(f"清空缓存失败: {str(e)}")
+
+    def get_chorus_interval(self, input_file: str) -> Optional[dict]:
+        """获取副歌区间缓存
+        Args:
+            input_file: 输入文件路径
+        Returns:
+            副歌区间dict（如{"start": 123.4, "end": 234.5}），没有则返回None
+        """
+        cache_key = self._generate_cache_key(input_file, '', 0)
+        index = self._load_index()
+        if cache_key in index and 'chorus_interval' in index[cache_key]:
+            return index[cache_key]['chorus_interval']
+        return None
+
+    def save_chorus_interval(self, input_file: str, interval: dict):
+        """保存副歌区间到缓存
+        Args:
+            input_file: 输入文件路径
+            interval: 副歌区间dict
+        """
+        cache_key = self._generate_cache_key(input_file, '', 0)
+        index = self._load_index()
+        if cache_key not in index:
+            index[cache_key] = {"timestamp": time.time()}
+        index[cache_key]['chorus_interval'] = interval
+        self._save_index(index)
