@@ -236,5 +236,27 @@
                 "default": 604800
             }
         }
+    },
+    "volc_chorus": {
+        "description": "火山副歌检测API配置",
+        "type": "object",
+        "hint": "用于副歌检测的火山API密钥配置",
+        "items": {
+            "ak": {
+                "description": "火山AK",
+                "type": "string",
+                "default": ""
+            },
+            "sk": {
+                "description": "火山SK",
+                "type": "string",
+                "default": ""
+            },
+            "appkey": {
+                "description": "火山AppKey",
+                "type": "string",
+                "default": ""
+            }
+        }
     }
 } 

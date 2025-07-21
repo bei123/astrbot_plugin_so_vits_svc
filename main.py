@@ -31,6 +31,8 @@ from pedalboard.io import AudioFile
 import numpy as np
 import psutil
 import traceback
+from pydub import AudioSegment
+from .song import detect_chorus_api
 
 class MSSTProcessor:
     """MSST 音频处理器"""
@@ -865,7 +867,7 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.3.2",
+    version="1.3.3",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -1074,6 +1076,11 @@ class SoVitsSvcPlugin(Star):
             song_name = None
             source_type = "file"  # 默认为文件上传
             model_dir = None  # 默认使用配置中的模型目录
+
+            only_chorus = False
+            if "-c" in args:
+                only_chorus = True
+                args.remove("-c")
 
             if len(args) >= 2:
                 speaker_id = args[0]
@@ -1349,6 +1356,30 @@ class SoVitsSvcPlugin(Star):
                 chain = [Record.fromFileSystem(cached_file)]
                 yield event.chain_result(chain)
                 return
+
+            # 音频文件准备好后，推理前裁切副歌
+            if only_chorus:
+                yield event.plain_result("正在检测副歌区间并裁切...")
+                try:
+                    with open(input_file, "rb") as f:
+                        audio_bytes = f.read()
+                    volc_conf = self.config.get("volc_chorus", {})
+                    chorus_result = await detect_chorus_api(audio_bytes, volc_conf)
+                    if chorus_result.get("msg") == "success":
+                        start = int(chorus_result["chorus"]["start"] * 1000)  # ms
+                        end = int(chorus_result["chorus"]["end"] * 1000)
+                        audio = AudioSegment.from_file(input_file)
+                        chorus_audio = audio[start:end]
+                        chorus_path = input_file.replace(".wav", "_chorus.wav")
+                        chorus_audio.export(chorus_path, format="wav")
+                        input_file = chorus_path  # 后续流程用副歌片段
+                        yield event.plain_result(f"副歌区间：{start//1000}s - {end//1000}s，已裁切。")
+                    else:
+                        yield event.plain_result("副歌检测失败：" + str(chorus_result))
+                        return
+                except Exception as e:
+                    yield event.plain_result(f"副歌检测或裁切出错：{str(e)}")
+                    return
 
             # 开始处理流程
             yield event.plain_result("正在使用MSST分离人声和伴奏...")
