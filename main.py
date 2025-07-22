@@ -1169,21 +1169,25 @@ class SoVitsSvcPlugin(Star):
                     info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
                     song_info = {"bvid": bvid}
 
-                    # 合并输出视频信息和处理提示
-                    result = f"正在处理哔哩哔哩视频：{song_name} (BV号: {bvid})\n"
+                    # 合并输出视频信息和处理提示（链式消息）
+                    
+                    chain = [
+                        Comp.At(qq=event.get_sender_id()),
+                        Comp.Plain(f"正在处理哔哩哔哩视频：{song_name} (BV号: {bvid})"),
+                    ]
                     if info:
-                        result += "\n视频信息：\n"
-                        result += f"标题：{info.get('title', '未知')}\n"
-                        result += f"UP主：{info.get('uploader', '未知')}\n"
-                        result += f"分P数量：{len(info.get('parts', []))}\n"
+                        chain.append(Comp.Plain("视频信息："))
+                        chain.append(Comp.Plain(f"标题：{info.get('title', '未知')}"))
+                        chain.append(Comp.Plain(f"UP主：{info.get('uploader', '未知')}"))
+                        chain.append(Comp.Plain(f"分P数量：{len(info.get('parts', []))}"))
                         if info.get('parts'):
-                            result += "分P列表：\n"
+                            part_list = ""
                             for part in info['parts']:
-                                result += f"{part.get('index', '?')}. {part.get('title', '未知')} ({part.get('duration', '?')})\n"
-                        result += f"\n使用方法：/唱 [说话人ID] [音调调整] bilibili {bvid}"
+                                part_list += f"{part.get('index', '?')}. {part.get('title', '未知')} ({part.get('duration', '?')})\n"
+                            chain.append(Comp.Plain("分P列表：\n" + part_list))
                         if info.get('pic'):
-                            result += f"\n封面：{info['pic']}"
-                    yield event.plain_result(result)
+                            chain.append(Comp.Image.fromURL(info['pic']))
+                    yield event.chain_result(chain)
 
                     # 下载前清理临时目录，避免历史文件干扰
                     for f in os.listdir(self.temp_dir):
