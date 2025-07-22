@@ -1155,6 +1155,34 @@ class SoVitsSvcPlugin(Star):
             task_id = str(uuid.uuid4())
 
             # 根据来源类型处理音频
+            source_type = None
+            song_info = None
+            if source_type == "bilibili" and song_name:
+                # ...原有bilibili分支...
+                source_type = "bilibili"
+                # video_info = ...
+                song_info = {"bvid": video_info.get("bvid") or video_info.get("bvid", None)}
+                # ...
+            elif source_type == "qqmusic" and song_name:
+                # ...原有qqmusic分支...
+                source_type = "qqmusic"
+                # song_info = ...
+                if song_info:
+                    song_info = {"songmid": song_info.get("songmid"), "level": song_info.get("level")}
+                # ...
+            elif song_name:
+                # ...原有网易云分支...
+                source_type = "netease"
+                # song_info = ...
+                if song_info:
+                    song_info = {"id": song_info.get("id"), "level": song_info.get("level")}
+                # ...
+            else:
+                # 文件上传分支
+                source_type = "file"
+                song_info = None
+
+            # 根据来源类型处理音频
             if source_type == "bilibili" and song_name:
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
