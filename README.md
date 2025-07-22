@@ -277,6 +277,30 @@
    - 每次成功转换后，自动保存到缓存
    - 缓存文件包含完整的参数信息，便于追踪和管理
 
+## 副歌检测与缓存
+
+插件支持自动检测音频的副歌（高潮）区间，并在推理前自动裁切副歌片段，提升转换效率和体验。
+
+### 支持的副歌检测
+- 支持对上传音频、网易云音乐、QQ音乐、哔哩哔哩视频等来源的音频进行副歌区间检测
+- 副歌检测基于火山引擎SAMI接口，自动识别歌曲高潮部分
+- 副歌区间检测结果会自动裁切音频，仅对副歌片段进行后续处理
+
+### 副歌区间缓存机制
+- 副歌区间检测结果会缓存，避免同一音频/歌曲重复请求副歌检测API
+- 缓存key策略：
+  - 网易云：`netease_<歌曲ID>_<音质>`
+  - QQ音乐：`qq_<songmid>_<音质>`
+  - 哔哩哔哩：`bilibili_<bvid>`
+  - 其他上传音频：使用音频内容hash
+- 副歌区间缓存文件为 `data/cache/so-vits-svc/chorus_cache.json`
+- 命中缓存时会直接使用已检测的副歌区间，无需再次请求API
+
+### 使用说明
+- 使用 `/convert_voice ... -c` 参数可启用副歌检测与裁切
+- 副歌区间检测和缓存机制对所有支持的音频来源均有效
+- 副歌区间缓存可大幅减少API调用次数，提高处理速度
+
 ## 依赖要求
 
 - Python 3.10+
@@ -312,7 +336,7 @@
 本插件使用的 API 实现参考：
 
 - MSST-WebUI API: https://github.com/bei123/MSST-WebUI/blob/api/scripts/preset_infer_api.py
-- So-Vits-SVC API: https://github.com/bei123/so-vits-svc/blob/api/flask_api_full_song.py
+- So-Vits-SVC API: https://github.com/bei123/so-vits-svc/blob/api/fastapi_api_full_song.py
 - BBDown: https://github.com/nilaoda/BBDown
 
 ## 致谢
@@ -320,11 +344,11 @@
 本项目使用了以下开源项目：
 
 - [MSST-WebUI](https://github.com/SUC-DriverOld/MSST-WebUI) - 用于音频预处理和分离
-- [So-Vits-SVC](https://github.com/svc-develop-team/so-vits-svc) - 用于语音转换
+- [So-Vits-SVC](https://github.com/svc-develop-team/so-vits-svc) - 用于音频转换
 - [Netease_url](https://github.com/Suxiaoqinx/Netease_url) - 用于网易云音乐解析和下载
 - [BBDown](https://github.com/nilaoda/BBDown) - 用于哔哩哔哩视频下载
 - [QQMusicApi](https://github.com/luren-dc/QQMusicApi) - 用于QQ音乐解析和下载
-- 自动混音感谢不知名好心人（代码见AutoSpark目录）
+- 自动混音感谢橘子佬（代码见AutoSpark目录）
 
 感谢这些优秀的开源项目。
 
