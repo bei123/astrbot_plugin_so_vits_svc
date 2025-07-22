@@ -332,4 +332,4 @@ def get_song_image_url(mid: str, size: int = 300) -> str:
     Returns:
         歌曲图片URL
     """
-    return f"https://y.qq.com/music/photo_new/T002R{size}x{size}M000{mid}.jpg"
+    return f"https://y.qq.com/music/photo_new/T002R{size}x{size}M000{mid}_1.jpg?max_age=2592000"
