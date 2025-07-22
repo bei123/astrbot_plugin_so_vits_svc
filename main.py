@@ -20,7 +20,7 @@ from astrbot.core import logger
 from astrbot.core.message.components import Record
 from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
-from .bilibili_api import BilibiliAPI
+from . import bilibili_api
 from .qqmusic_api import QQMusicAPI
 from .cache_manager import CacheManager
 import asyncio
@@ -33,6 +33,7 @@ import psutil
 import traceback
 from pydub import AudioSegment
 from .song import detect_chorus_api
+import astrbot.api.message_components as Comp
 
 class MSSTProcessor:
     """MSST 音频处理器"""
@@ -289,7 +290,7 @@ class VoiceConverter:
         # 初始化组件
         self.msst_processor = MSSTProcessor(self.msst_url)
         self.netease_api = NeteaseMusicAPI(self.config)
-        self.bilibili_api = BilibiliAPI(self.config)
+        self.bilibili_api = bilibili_api.BilibiliAPI(self.config)  # 立即初始化 converter
         self.qqmusic_api = QQMusicAPI(self.config)
 
         # 初始化缓存管理器
@@ -1159,8 +1160,37 @@ class SoVitsSvcPlugin(Star):
             if source_type == "bilibili" and song_name:
                 # ...原有bilibili分支...
                 source_type = "bilibili"
-                video_info = self.converter.bilibili_api.process_video(song_name)
-                song_info = {"bvid": video_info.get("bvid") or video_info.get("bvid", None)}
+                # 直接调用bilibili_api的异步下载
+                bvid = song_name.strip()
+                await event.plain_result(f"正在处理哔哩哔哩视频：{bvid}...")
+                cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
+                await bilibili_api.bilibili_download_api(bvid, self.temp_dir, only_audio=True, cookie=cookie)
+                # 查找下载的音频文件（支持多种格式，优先无损）
+                audio_file = None
+                audio_ext_priority = ['.flac', '.wav', '.m4a', '.mp3', '.m4s']
+                for ext in audio_ext_priority:
+                    for f in os.listdir(self.temp_dir):
+                        if f.endswith(ext):
+                            audio_file = os.path.join(self.temp_dir, f)
+                            break
+                    if audio_file:
+                        break
+                if not audio_file or not os.path.exists(audio_file):
+                    yield event.plain_result("下载音频失败！")
+                    return
+                # 如需统一格式，自动转为wav
+                if not audio_file.endswith('.wav'):
+                    import subprocess
+                    wav_file = os.path.splitext(audio_file)[0] + '.wav'
+                    subprocess.run(['ffmpeg', '-y', '-i', audio_file, wav_file])
+                    audio_file = wav_file
+                # 获取视频信息
+                cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
+                info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
+                song_info = {"bvid": bvid}
+                # 复制音频到input_file
+                import shutil
+                shutil.copy(audio_file, input_file)
                 # ...
             elif source_type == "qqmusic" and song_name:
                 # ...原有qqmusic分支...
@@ -1186,40 +1216,37 @@ class SoVitsSvcPlugin(Star):
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
 
-                    # 检查BBDown配置
-                    if not self.converter.bilibili_api.bbdown_path:
-                        yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
-                        return
+                    bvid = song_name.strip()
+                    cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
+                    await bilibili_api.bilibili_download_api(bvid, self.temp_dir, only_audio=True, cookie=cookie)
 
-                    # 检查BBDown是否存在
-                    if not os.path.exists(self.converter.bilibili_api.bbdown_path):
-                        yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
-                        return
-
-                    # 检查BBDown是否有执行权限
-                    if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
-                        yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
-                        return
-
-                    video_info = self.converter.bilibili_api.process_video(song_name)
-
-                    if not video_info:
-                        yield event.plain_result(f"处理视频失败：{song_name}")
-                        return
-
-                    yield event.plain_result(
-                        f"找到视频：{video_info.get('title', '未知视频')} - {video_info.get('uploader', '未知UP主')}\n"
-                        f"正在下载音频..."
-                    )
-
-                    downloaded_file = video_info.get("audio_file")
-                    if not downloaded_file or not os.path.exists(downloaded_file):
+                    # 查找下载的音频文件（支持多种格式，优先无损）
+                    audio_file = None
+                    audio_ext_priority = ['.flac', '.wav', '.m4a', '.mp3', '.m4s']
+                    for ext in audio_ext_priority:
+                        for f in os.listdir(self.temp_dir):
+                            if f.endswith(ext):
+                                audio_file = os.path.join(self.temp_dir, f)
+                                break
+                        if audio_file:
+                            break
+                    if not audio_file or not os.path.exists(audio_file):
                         yield event.plain_result("下载音频失败！")
                         return
+                    # 如需统一格式，自动转为wav
+                    if not audio_file.endswith('.wav'):
+                        import subprocess
+                        wav_file = os.path.splitext(audio_file)[0] + '.wav'
+                        subprocess.run(['ffmpeg', '-y', '-i', audio_file, wav_file])
+                        audio_file = wav_file
 
-                    # 将下载的音频文件复制到输入文件路径
+                    # 获取视频信息
+                    info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
+                    song_info = {"bvid": bvid}
+
+                    # 复制音频到input_file
                     import shutil
-                    shutil.copy(downloaded_file, input_file)
+                    shutil.copy(audio_file, input_file)
 
                 except Exception as e:
                     logger.error(f"处理哔哩哔哩视频时出错: {str(e)}")
@@ -1821,22 +1848,8 @@ class SoVitsSvcPlugin(Star):
         try:
             yield event.plain_result(f"正在获取视频信息：{url_or_bvid}...")
 
-            # 检查BBDown配置
-            if not self.converter.bilibili_api.bbdown_path:
-                yield event.plain_result("错误：未配置BBDown路径，请在插件配置中设置bbdown_path")
-                return
-
-            # 检查BBDown是否存在
-            if not os.path.exists(self.converter.bilibili_api.bbdown_path):
-                yield event.plain_result(f"错误：BBDown可执行文件不存在: {self.converter.bilibili_api.bbdown_path}\n请确保BBDown已正确安装并配置")
-                return
-
-            # 检查BBDown是否有执行权限
-            if not os.access(self.converter.bilibili_api.bbdown_path, os.X_OK):
-                yield event.plain_result(f"错误：BBDown可执行文件没有执行权限: {self.converter.bilibili_api.bbdown_path}\n请在服务器上执行: chmod +x {self.converter.bilibili_api.bbdown_path}")
-                return
-
-            video_info = self.converter.bilibili_api.get_video_info(url_or_bvid)
+            cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
+            video_info = await bilibili_api.fetch_bilibili_video_info(url_or_bvid, cookie=cookie)
 
             if not video_info:
                 yield event.plain_result(f"获取视频信息失败：{url_or_bvid}")
@@ -1853,9 +1866,13 @@ class SoVitsSvcPlugin(Star):
                     result += f"{part['index']}. {part['title']} ({part['duration']})\n"
 
             result += "\n使用方法：\n"
-            result += f"/convert_voice [说话人ID] [音调调整] bilibili {url_or_bvid}"
+            result += f"/唱 [说话人ID] [音调调整] bilibili {url_or_bvid}"
 
-            yield event.plain_result(result)
+            chain = []
+            if video_info.get('pic'):
+                chain.append(Comp.Image.fromURL(video_info['pic']))
+            chain.append(Comp.Plain(result))
+            yield event.chain_result(chain)
 
         except Exception as e:
             logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}\n{traceback.format_exc()}")

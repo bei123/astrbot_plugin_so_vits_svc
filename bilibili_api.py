@@ -1,369 +1,244 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-哔哩哔哩API模块
-提供解析和下载哔哩哔哩视频音频的功能
-"""
-
+import asyncio
+import aiohttp
+from functools import reduce
+from hashlib import md5
+import urllib.parse
+import time
+import re
 import os
 import subprocess
-import re
-import time
-from typing import Dict, Optional, List, Tuple
-from astrbot.core import logger
 
 
-class BilibiliAPI:
-    """哔哩哔哩API类"""
+mixinKeyEncTab = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+    61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+    36, 20, 34, 44, 52
+]
 
-    def __init__(self, config: Dict = None):
-        """初始化API
+def getMixinKey(orig: str):
+    '对 imgKey 和 subKey 进行字符顺序打乱编码'
+    return reduce(lambda s, i: s + orig[i], mixinKeyEncTab, '')[:32]
 
-        Args:
-            config: 插件配置字典
-        """
-        self.config = config or {}
-        self.base_setting = self.config.get("base_setting", {})
-        self.bbdown_path = self.base_setting.get("bbdown_path", "BBDown")
-        self.bbdown_cookie = self.base_setting.get("bbdown_cookie", "")
-        self.temp_dir = os.path.join("data", "temp", "bilibili")
-        os.makedirs(self.temp_dir, exist_ok=True)
+def encWbi(params: dict, img_key: str, sub_key: str):
+    '为请求参数进行 wbi 签名'
+    mixin_key = getMixinKey(img_key + sub_key)
+    curr_time = round(time.time())
+    params['wts'] = curr_time                                   # 添加 wts 字段
+    params = dict(sorted(params.items()))                       # 按照 key 重排参数
+    # 过滤 value 中的 "!'()*" 字符
+    params = {
+        k : ''.join(filter(lambda chr: chr not in "!'()*", str(v)))
+        for k, v 
+        in params.items()
+    }
+    query = urllib.parse.urlencode(params)                      # 序列化参数
+    wbi_sign = md5((query + mixin_key).encode()).hexdigest()    # 计算 w_rid
+    params['w_rid'] = wbi_sign
+    return params
 
-        # 临时文件清理设置
-        self.max_temp_age = 24 * 60 * 60  # 临时文件最大保存时间（24小时）
-        self.cleanup_temp_files()  # 初始化时清理旧的临时文件
+def sanitize_filename(name):
+    # 去除Windows非法文件名字符
+    return re.sub(r'[\\/:*?"<>|]', '', name)
 
-    def cleanup_temp_files(self):
-        """清理过期的临时文件"""
-        try:
-            current_time = time.time()
-            for filename in os.listdir(self.temp_dir):
-                file_path = os.path.join(self.temp_dir, filename)
-                # 检查文件最后修改时间
-                if os.path.isfile(file_path):
-                    file_age = current_time - os.path.getmtime(file_path)
-                    if file_age > self.max_temp_age:
-                        try:
-                            os.remove(file_path)
-                            logger.info(f"已清理过期临时文件: {file_path}")
-                        except OSError as e:
-                            logger.error(f"清理临时文件失败: {str(e)}")
-        except Exception as e:
-            logger.error(f"清理临时文件时出错: {str(e)}")
+def unescape_url(url):
+    return re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), url)
 
-    def _run_bbdown(self, command: List[str]) -> Tuple[int, str, str]:
-        """运行BBDown命令
+async def fetch_json(session, url, **kwargs):
+    async with session.get(url, **kwargs) as resp:
+        resp.raise_for_status()
+        return await resp.json()
 
-        Args:
-            command: 命令参数列表
+async def download_file(session, url, path, headers):
+    async with session.get(url, headers=headers) as resp:
+        resp.raise_for_status()
+        with open(path, 'wb') as f:
+            async for chunk in resp.content.iter_chunked(8192):
+                f.write(chunk)
 
-        Returns:
-            返回码、标准输出和标准错误
-        """
-        try:
-            # 检查文件是否存在
-            if not os.path.exists(self.bbdown_path):
-                error_msg = f"BBDown可执行文件不存在: {self.bbdown_path}"
-                logger.error(error_msg)
-                return -1, "", error_msg
+async def download_audio_by_url(session, url, save_path, headers):
+    print(f"[音频下载] 正在下载音频流: {url}")
+    async with session.get(url, headers=headers) as resp:
+        resp.raise_for_status()
+        with open(save_path, 'wb') as f:
+            async for chunk in resp.content.iter_chunked(8192):
+                f.write(chunk)
+    print(f"[音频下载] 音频流已保存为: {save_path}")
 
-            # 检查文件是否有执行权限
-            if not os.access(self.bbdown_path, os.X_OK):
-                error_msg = f"BBDown可执行文件没有执行权限: {self.bbdown_path}"
-                logger.error(error_msg)
-                return -1, "", error_msg
+async def getWbiKeys(session, headers):
+    '获取最新的 img_key 和 sub_key'
+    url = 'https://api.bilibili.com/x/web-interface/nav'
+    async with session.get(url, headers=headers) as resp:
+        resp.raise_for_status()
+        json_content = await resp.json()
+        img_url: str = json_content['data']['wbi_img']['img_url']
+        sub_url: str = json_content['data']['wbi_img']['sub_url']
+        img_key = img_url.rsplit('/', 1)[1].split('.')[0]
+        sub_key = sub_url.rsplit('/', 1)[1].split('.')[0]
+        return img_key, sub_key
 
-            # 构建完整命令字符串
-            # 使用shell=True，让系统通过shell来执行命令
-            cmd_str = f'"{self.bbdown_path}"'
-
-            # 如果有cookie，添加cookie参数
-            if self.bbdown_cookie:
-                cmd_str += f' -c "{self.bbdown_cookie}"'
-
-            # 添加其他参数
-            for arg in command:
-                if " " in arg:
-                    cmd_str += f' "{arg}"'
-                else:
-                    cmd_str += f" {arg}"
-
-            logger.info(f"执行BBDown命令: {cmd_str}")
-
-            # 执行命令
-            result = subprocess.run(
-                cmd_str,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            return result.returncode, result.stdout, result.stderr
-
-        except Exception as e:
-            logger.error(f"执行BBDown命令出错: {str(e)}")
-            return -1, "", str(e)
-
-    def extract_bvid(self, url_or_bvid: str) -> Optional[str]:
-        """从URL或BV号中提取BV号
-
-        Args:
-            url_or_bvid: 哔哩哔哩视频URL或BV号
-
-        Returns:
-            提取的BV号，如果无法提取则返回None
-        """
-        # 如果已经是BV号格式
-        if re.match(r"^BV[a-zA-Z0-9]+$", url_or_bvid):
-            return url_or_bvid
-
-        # 尝试从URL中提取BV号
-        bvid_pattern = r"BV[a-zA-Z0-9]+"
-        match = re.search(bvid_pattern, url_or_bvid)
-        if match:
-            return match.group(0)
-
-        # 尝试从URL中提取av号
-        av_pattern = r"av(\d+)"
-        match = re.search(av_pattern, url_or_bvid)
-        if match:
-            av_id = match.group(1)
-            # 使用BBDown将av号转换为BV号
-            returncode, stdout, stderr = self._run_bbdown(["--info", f"av{av_id}"])
-            if returncode == 0:
-                bvid_match = re.search(bvid_pattern, stdout)
-                if bvid_match:
-                    return bvid_match.group(0)
-
-        return None
-
-    def get_video_info(self, url_or_bvid: str) -> Optional[Dict]:
-        """获取视频信息
-
-        Args:
-            url_or_bvid: 视频URL或BV号
-
-        Returns:
-            视频信息，包括标题、UP主、分P信息等
-        """
-        try:
-            # 提取BV号
-            bvid = self.extract_bvid(url_or_bvid)
-            if not bvid:
-                logger.error(f"无法从 {url_or_bvid} 中提取BV号")
-                return None
-
-            # 构建URL
-            if not url_or_bvid.startswith("http"):
-                url = f"https://www.bilibili.com/video/{bvid}"
-            else:
-                url = url_or_bvid
-
-            # 使用BBDown的info功能
-            # 根据BBDown文档，正确的命令格式是: BBDown <url> -info
-            # 注意：URL必须放在第一个参数位置，-info放在URL后面
-            logger.info(f"尝试获取视频信息: {url}")
-            returncode, stdout, stderr = self._run_bbdown([url, "-info"])
-
-            if returncode != 0:
-                logger.error(f"获取视频信息失败: 返回码={returncode}, 错误信息={stderr}")
-                logger.error(f"标准输出: {stdout}")
-                return None
-
-            # 解析视频信息
-            info = {
+async def fetch_bilibili_video_info(bvid, cookie=None):
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "referer": "https://www.bilibili.com",
+        "cookie": cookie or ""
+    }
+    async with aiohttp.ClientSession() as session:
+        info_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+        info_data = await fetch_json(session, info_url, headers=headers)
+        if info_data['code'] == 0:
+            video_info = info_data['data']
+            parts = [{
+                "index": 1,
+                "title": video_info['title'],
+                "duration": video_info['duration']
+            }]
+            return {
                 "bvid": bvid,
-                "title": "",
-                "uploader": "",
-                "parts": []
+                "title": video_info['title'],
+                "uploader": video_info['owner']['name'],
+                "parts": parts,
+                "cid": video_info['cid'],
+                "desc": video_info['desc'],
+                "pic": video_info['pic']
             }
+        else:
+            return {}
 
-            lines = stdout.strip().split("\n")
-            for line in lines:
-                if "标题:" in line:
-                    info["title"] = line.split("标题:", 1)[1].strip()
-                elif "UP主:" in line:
-                    info["uploader"] = line.split("UP主:", 1)[1].strip()
-                elif re.match(r"^\d+\.", line):
-                    # 解析分P信息
-                    part_match = re.match(r"^(\d+)\.\s+(.+?)\s+\((\d+:\d+)\)$", line)
-                    if part_match:
-                        part_index, part_title, duration = part_match.groups()
-                        info["parts"].append({
-                            "index": int(part_index),
-                            "title": part_title,
-                            "duration": duration
-                        })
-
-            # 检查是否成功解析到标题
-            if not info["title"]:
-                logger.error(f"无法解析视频标题，原始输出: {stdout}")
-                return None
-
-            return info
-
-        except Exception as e:
-            logger.error(f"获取视频信息出错: {str(e)}")
-            import traceback
-            logger.error(f"错误堆栈: {traceback.format_exc()}")
-            return None
-
-    def download_audio(self, url_or_bvid: str, part_index: Optional[int] = None, output_dir: Optional[str] = None) -> Optional[str]:
-        """下载视频音频
-
-        Args:
-            url_or_bvid: 视频URL或BV号
-            part_index: 分P序号，不指定则下载所有分P
-            output_dir: 输出目录，不指定则使用临时目录
-
-        Returns:
-            下载的音频文件路径，失败返回None
-        """
+async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=False, cookie=None):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "referer": "https://www.bilibili.com",
+        "cookie": cookie or ""
+    }
+    os.makedirs(save_dir, exist_ok=True)
+    # 获取视频信息
+    info = await fetch_bilibili_video_info(bvid, cookie=cookie)
+    if not info:
+        print("获取视频信息失败")
+        return
+    cid = info['cid']
+    title = sanitize_filename(info['title'])
+    img_key, sub_key = await getWbiKeys(session, headers)
+    params = {
+        'bvid': bvid,
+        'cid': cid,
+        'qn': qn,
+        'fnval': fnval,
+        'fnver': '0',
+        'fourk': '1',
+        'otype': 'json',
+        'platform': 'web',
+    }
+    signed_params = encWbi(params, img_key, sub_key)
+    stream_url = "https://api.bilibili.com/x/player/wbi/playurl"
+    async with session.get(stream_url, params=signed_params, headers=headers) as stream_resp:
+        stream_resp.raise_for_status()
+        stream_data = await stream_resp.json()
+    data = stream_data.get('data', {})
+    if 'dash' in data:
+        dash = data['dash']
+        # 打印所有可用音频流信息
+        print('可用音频流：')
+        for a in dash['audio']:
+            print(f"id={a['id']} 码率={a['bandwidth']//1000}kbps 编码={a['codecs']} baseUrl={a['baseUrl']}")
+        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+            f = dash['flac']['audio']
+            print(f"无损音频流: id={f['id']} 码率={f['bandwidth']//1000}kbps 编码={f['codecs']} baseUrl={f['baseUrl']}")
+        # 优先选择flac无损音轨
+        audio_url = None
+        audio_desc = None
+        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+            f = dash['flac']['audio']
+            audio_url = unescape_url(f['baseUrl'])
+            audio_desc = f['id']
+        else:
+            audio_quality_priority = [30250, 30280, 30232, 30216]
+            for q in audio_quality_priority:
+                for audio in dash['audio']:
+                    if audio.get('id') == q:
+                        audio_url = unescape_url(audio['baseUrl'])
+                        audio_desc = q
+                        break
+                if audio_url:
+                    break
+            if not audio_url:
+                audio_url = unescape_url(dash['audio'][0]['baseUrl'])
+                audio_desc = dash['audio'][0].get('id')
+        video_url = unescape_url(dash['video'][0]['baseUrl'])
+        audio_path = os.path.join(save_dir, 'audio.m4s')
+        if only_audio:
+            print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
+            await download_file(session, audio_url, audio_path, headers)
+            print(f"[DASH] 音频流已保存为: {audio_path}")
+            # 转为mp3
+            output_mp3 = os.path.join(save_dir, f"{title}.mp3")
+            print(f"[DASH] 正在转换音频流为: {output_mp3}")
+            try:
+                subprocess.run([
+                    'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'libmp3lame', output_mp3
+                ], check=True)
+                print(f"[DASH] 转换完成: {output_mp3}")
+                os.remove(audio_path)
+            except Exception as e:
+                print("[DASH] 音频转换失败，请手动转换。错误：", e)
+        else:
+            video_path = os.path.join(save_dir, 'video.m4s')
+            print("[DASH] 正在下载视频流...")
+            await download_file(session, video_url, video_path, headers)
+            print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
+            await download_file(session, audio_url, audio_path, headers)
+            print(f"[DASH] 视频流已保存为: {video_path}")
+            print(f"[DASH] 音频流已保存为: {audio_path}")
+            # 合并音视频流
+            output_mp4 = os.path.join(save_dir, f"{title}.mp4")
+            print(f"[DASH] 正在合并音视频流为: {output_mp4}")
+            try:
+                subprocess.run([
+                    'ffmpeg', '-y', '-i', video_path, '-i', audio_path,
+                    '-c:v', 'copy', '-c:a', 'copy', '-f', 'mp4', output_mp4
+                ], check=True)
+                print(f"[DASH] 合并完成: {output_mp4}")
+                os.remove(video_path)
+                os.remove(audio_path)
+            except Exception as e:
+                print("[DASH] 合并失败，请手动合并。错误：", e)
+            # 杜比/无损音频单独下载
+            if 'dolby' in dash and dash['dolby'] and dash['dolby'].get('audio'):
+                dolby_url = unescape_url(dash['dolby']['audio'][0]['baseUrl'])
+                dolby_path = os.path.join(save_dir, 'dolby_audio.m4s')
+                print("[DASH] 正在下载杜比音频流...")
+                await download_file(session, dolby_url, dolby_path, headers)
+                print(f"[DASH] 杜比音频流已保存为: {dolby_path}")
+            if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+                flac_url = unescape_url(dash['flac']['audio']['baseUrl'])
+                flac_path = os.path.join(save_dir, 'flac_audio.m4s')
+                print("[DASH] 正在下载无损音频流...")
+                await download_file(session, flac_url, flac_path, headers)
+                print(f"[DASH] 无损音频流已保存为: {flac_path}")
+    elif 'durl' in data:
+        durl = data['durl']
+        print("提示：该视频不支持DASH流，已自动切换为MP4分段下载。")
+        print("[FLV/MP4] 正在下载视频流...")
+        seg_paths = []
+        for i, item in enumerate(durl):
+            seg_url = unescape_url(item['url'])
+            seg_path = os.path.join(save_dir, f'segment{i+1}.flv')
+            print(f"下载分段{i+1}...")
+            await download_file(session, seg_url, seg_path, headers)
+            print(f"分段{i+1}已保存为: {seg_path}")
+            seg_paths.append(seg_path)
+        output_mp4 = os.path.join(save_dir, f'{title}.mp4')
+        print(f"[FLV/MP4] 正在合并分段为: {output_mp4}")
         try:
-            # 清理过期的临时文件
-            self.cleanup_temp_files()
-
-            # 提取BV号
-            bvid = self.extract_bvid(url_or_bvid)
-            if not bvid:
-                logger.error(f"无法从 {url_or_bvid} 中提取BV号")
-                return None
-
-            # 构建URL
-            if not url_or_bvid.startswith("http"):
-                url = f"https://www.bilibili.com/video/{bvid}"
-            else:
-                url = url_or_bvid
-
-            # 设置输出目录
-            if not output_dir:
-                output_dir = self.temp_dir
-
-            # 构建命令
-            # 根据BBDown文档，正确的命令格式是: BBDown <url> --audio-only [options]
-            # 注意：URL必须放在第一个参数位置
-            command = [url, "--audio-only"]
-
-            # 添加工作目录参数
-            command.extend(["--work-dir", output_dir])
-
-            # 如果指定了分P，添加分P参数
-            if part_index is not None:
-                command.extend(["-p", str(part_index)])
-
-            # 执行下载
-            returncode, stdout, stderr = self._run_bbdown(command)
-
-            if returncode != 0:
-                logger.error(f"下载音频失败: {stderr}")
-                return None
-
-            # 查找下载的文件
-            # BBDown通常会将文件保存在指定目录下，文件名格式为: 标题_音频.m4a
-            files = os.listdir(output_dir)
-            audio_files = [f for f in files if f.endswith(".m4a")]
-
-            if not audio_files:
-                logger.error("未找到下载的音频文件")
-                return None
-
-            # 返回最新下载的文件路径
-            latest_file = max([os.path.join(output_dir, f) for f in audio_files], key=os.path.getctime)
-            return latest_file
-
+            concat_list = '|'.join(seg_paths)
+            subprocess.run([
+                'ffmpeg', '-y', '-i', f'concat:{concat_list}', '-c', 'copy', output_mp4
+            ], check=True)
+            print(f"[FLV/MP4] 合并完成: {output_mp4}")
+            for seg_path in seg_paths:
+                os.remove(seg_path)
         except Exception as e:
-            logger.error(f"下载音频出错: {str(e)}")
-            return None
-
-    def process_video(self, url_or_bvid: str) -> Optional[Dict]:
-        """处理视频，获取信息并下载音频
-
-        Args:
-            url_or_bvid: 视频URL或BV号
-
-        Returns:
-            包含视频信息和音频文件路径的字典
-        """
-        try:
-            # 清理过期的临时文件
-            self.cleanup_temp_files()
-
-            # 获取视频信息
-            video_info = self.get_video_info(url_or_bvid)
-            if not video_info:
-                return None
-
-            # 下载音频
-            audio_file = self.download_audio(url_or_bvid)
-            if not audio_file:
-                return None
-
-            # 添加音频文件路径到视频信息中
-            video_info["audio_file"] = audio_file
-            return video_info
-
-        except Exception as e:
-            logger.error(f"处理视频时出错: {str(e)}")
-            return None
-
-    def download_song(self, video_info: Dict, save_path: Optional[str] = None) -> Optional[str]:
-        """下载歌曲
-
-        Args:
-            video_info: 视频信息字典
-            save_path: 保存路径，默认为None，将使用临时目录
-
-        Returns:
-            下载的文件路径，失败返回None
-        """
-        try:
-            # 清理过期的临时文件
-            self.cleanup_temp_files()
-
-            if not video_info or not video_info.get("audio_file"):
-                return None
-
-            if not save_path:
-                save_path = self.temp_dir
-
-            # 构建目标文件路径
-            source_file = video_info["audio_file"]
-            target_file = os.path.join(save_path, os.path.basename(source_file))
-
-            # 如果源文件和目标文件相同，直接返回
-            if os.path.abspath(source_file) == os.path.abspath(target_file):
-                return source_file
-
-            # 复制文件
-            import shutil
-            shutil.copy2(source_file, target_file)
-
-            return target_file
-
-        except Exception as e:
-            logger.error(f"下载歌曲时出错: {str(e)}")
-            return None
-
-
-# 使用示例
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="哔哩哔哩API工具")
-    parser.add_argument("url_or_bvid", help="哔哩哔哩视频URL或BV号")
-    parser.add_argument("--download", action="store_true", help="下载音频")
-    parser.add_argument("--save-path", help="保存路径")
-
-    args = parser.parse_args()
-
-    # 创建API实例
-    api = BilibiliAPI()
-
-    # 处理视频
-    video = api.process_video(args.url_or_bvid)
-
-    # 如果需要下载音频
-    if args.download and video:
-        api.download_song(video, args.save_path)
+            print("[FLV/MP4] 合并失败，请手动合并。错误：", e)
+    else:
+        print("未获取到视频流信息")
