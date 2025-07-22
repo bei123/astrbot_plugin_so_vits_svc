@@ -1362,18 +1362,19 @@ class SoVitsSvcPlugin(Star):
                 yield event.plain_result("正在检测副歌区间并裁切...")
                 try:
                     # 副歌检测前，先查缓存
-                    chorus_interval = self.converter.cache_manager.get_chorus_interval(input_file)
+                    original_input_file = input_file  # 记录原始音频文件路径
+                    chorus_interval = self.converter.cache_manager.get_chorus_interval(original_input_file)
                     if chorus_interval:
                         start = int(chorus_interval["start"] * 1000)
                         end = int(chorus_interval["end"] * 1000)
-                        audio = AudioSegment.from_file(input_file)
+                        audio = AudioSegment.from_file(original_input_file)
                         chorus_audio = audio[start:end]
-                        chorus_path = input_file.replace(".wav", "_chorus.wav")
+                        chorus_path = original_input_file.replace(".wav", "_chorus.wav")
                         chorus_audio.export(chorus_path, format="wav")
                         input_file = chorus_path
                         yield event.plain_result(f"副歌区间（缓存）：{start//1000}s - {end//1000}s，已裁切。")
                     else:
-                        with open(input_file, "rb") as f:
+                        with open(original_input_file, "rb") as f:
                             audio_bytes = f.read()
                         volc_conf = self.config.get("volc_chorus", {})
                         print("volc_conf:", volc_conf)  # 调试打印
@@ -1381,14 +1382,14 @@ class SoVitsSvcPlugin(Star):
                         if chorus_result.get("msg") == "success":
                             start = int(chorus_result["chorus"]["start"] * 1000)  # ms
                             end = int(chorus_result["chorus"]["end"] * 1000)
-                            audio = AudioSegment.from_file(input_file)
+                            audio = AudioSegment.from_file(original_input_file)
                             chorus_audio = audio[start:end]
-                            chorus_path = input_file.replace(".wav", "_chorus.wav")
+                            chorus_path = original_input_file.replace(".wav", "_chorus.wav")
                             chorus_audio.export(chorus_path, format="wav")
                             input_file = chorus_path  # 后续流程用副歌片段
-                            # 写入缓存
+                            # 写入缓存，key用原始音频文件
                             self.converter.cache_manager.save_chorus_interval(
-                                input_file, chorus_result["chorus"]
+                                original_input_file, chorus_result["chorus"]
                             )
                             yield event.plain_result(f"副歌区间：{start//1000}s - {end//1000}s，已裁切。")
                         else:
