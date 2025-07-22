@@ -1291,7 +1291,7 @@ class SoVitsSvcPlugin(Star):
                             yield event.plain_result(f"模型目录 {model_dir} 不存在！")
                             return
 
-                    yield event.plain_result(f"正在搜索歌曲：{song_name}...")
+                    # yield event.plain_result(f"正在搜索歌曲：{song_name}...")
                     song_info = await self.converter.netease_api.get_song_with_highest_quality(
                         song_name
                     )
@@ -1306,7 +1306,9 @@ class SoVitsSvcPlugin(Star):
                         )
                         return
 
+                    # import astrbot.api.message_components as Comp
                     chain = [
+                        Comp.Plain(f"正在搜索歌曲：{song_name}..."),
                         Comp.Plain(f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}"),
                         Comp.Plain(f"音质：{song_info.get('level', '未知音质')}"),
                         Comp.Plain(f"大小：{song_info.get('size', '未知大小')}")
