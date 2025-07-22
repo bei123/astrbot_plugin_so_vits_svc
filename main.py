@@ -1163,15 +1163,28 @@ class SoVitsSvcPlugin(Star):
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
 
-                    bvid = song_name.strip()
+                    # 用正则提取BV号
+                    bvid = extract_bvid(song_name.strip())
                     cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
+
+                    # 下载前清理临时目录，避免历史文件干扰
+                    for f in os.listdir(self.temp_dir):
+                        try:
+                            os.remove(os.path.join(self.temp_dir, f))
+                        except Exception as e:
+                            logger.warning(f"清理临时文件失败: {f}, {str(e)}")
+
+                    # 下载前后文件列表对比，只处理新生成的音频文件
+                    before_files = set(os.listdir(self.temp_dir))
                     await bilibili_api.bilibili_download_api(bvid, self.temp_dir, only_audio=True, cookie=cookie)
+                    after_files = set(os.listdir(self.temp_dir))
+                    new_files = after_files - before_files
 
                     # 查找下载的音频文件（支持多种格式，优先无损）
                     audio_file = None
                     audio_ext_priority = ['.flac', '.wav', '.m4a', '.mp3', '.m4s']
                     for ext in audio_ext_priority:
-                        for f in os.listdir(self.temp_dir):
+                        for f in new_files:
                             if f.endswith(ext):
                                 audio_file = os.path.join(self.temp_dir, f)
                                 break
@@ -1303,7 +1316,7 @@ class SoVitsSvcPlugin(Star):
             else:
                 if (
                     not hasattr(event.message_obj, "files")
-                    or not event.message_obj.files
+                    or not event.message_obj.filesx
                 ):
                     yield event.plain_result(
                         "请上传要转换的音频文件或指定歌曲名！\n"
