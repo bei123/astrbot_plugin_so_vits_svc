@@ -1410,13 +1410,14 @@ class SoVitsSvcPlugin(Star):
 
             # 音频文件准备好后，推理前裁切副歌
             if only_chorus:
-                # yield event.plain_result("正在检测副歌区间并裁切...")
                 try:
                     # 副歌检测前，先查缓存
                     # 优先用歌曲ID+音质做key，支持网易云、QQ音乐、B站
-                    song_info = locals().get("song_info")  # 兼容不同来源
-                    source_type = locals().get("source_type", None)
-                    chorus_cache_key, is_custom_key = get_chorus_cache_key(source_type, song_info, input_file)
+                    # 修正：source_type根据实际来源赋值
+                    if source_type == "file" and song_info and song_info.get("id") and song_info.get("level"):
+                        chorus_cache_key, is_custom_key = get_chorus_cache_key("netease", song_info, input_file)
+                    else:
+                        chorus_cache_key, is_custom_key = get_chorus_cache_key(source_type, song_info, input_file)
                     logger.info(f"副歌缓存key: {chorus_cache_key}, is_custom_key: {is_custom_key}, song_info: {song_info}, source_type: {source_type}")
                     chorus_interval = self.converter.cache_manager.get_chorus_interval(chorus_cache_key, is_custom_key)
                     if chorus_interval:
@@ -1428,7 +1429,6 @@ class SoVitsSvcPlugin(Star):
                         chorus_path = audio_file_for_cut.replace(".wav", "_chorus.wav")
                         chorus_audio.export(chorus_path, format="wav")
                         input_file = chorus_path
-                        # yield event.plain_result(f"副歌区间（缓存）：{start//1000}s - {end//1000}s，已裁切。")
                     else:
                         audio_file_for_cut = input_file if is_custom_key else input_file
                         with open(audio_file_for_cut, "rb") as f:
@@ -1449,7 +1449,6 @@ class SoVitsSvcPlugin(Star):
                                 chorus_cache_key, chorus_result["chorus"], is_custom_key
                             )
                             logger.info(f"副歌区间写入缓存: key={chorus_cache_key}, is_custom_key={is_custom_key}, value={chorus_result['chorus']}")
-                            # yield event.plain_result(f"副歌区间：{start//1000}s - {end//1000}s，已裁切。")
                         else:
                             yield event.plain_result("副歌检测失败：" + str(chorus_result))
                             return
