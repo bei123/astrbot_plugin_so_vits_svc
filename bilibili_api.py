@@ -172,14 +172,14 @@ async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=
                 print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
                 await download_file(session, audio_url, audio_path, headers)
                 print(f"[DASH] 音频流已保存为: {audio_path}")
-                # 转为mp3
-                output_mp3 = os.path.join(save_dir, f"{title}.mp3")
-                print(f"[DASH] 正在转换音频流为: {output_mp3}")
+                # 转为wav
+                output_wav = os.path.join(save_dir, f"{title}.wav")
+                print(f"[DASH] 正在转换音频流为: {output_wav}")
                 try:
                     subprocess.run([
-                        'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'libmp3lame', output_mp3
+                        'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', output_wav
                     ], check=True)
-                    print(f"[DASH] 转换完成: {output_mp3}")
+                    print(f"[DASH] 转换完成: {output_wav}")
                     os.remove(audio_path)
                 except Exception as e:
                     print("[DASH] 音频转换失败，请手动转换。错误：", e)
