@@ -1180,7 +1180,7 @@ class SoVitsSvcPlugin(Star):
                         chain.append(Comp.Plain("【视频信息】"))
                         chain.append(Comp.Plain(f"标题：{info.get('title', '未知')}"))
                         chain.append(Comp.Plain(f"UP主：{info.get('uploader', '未知')}"))
-                        chain.append(Comp.Plain(f"分P数量：{len(info.get('parts', []))}"))
+                        # chain.append(Comp.Plain(f"分P数量：{len(info.get('parts', []))}"))
                         if info.get('parts'):
                             chain.append(Comp.Plain(""))
                             chain.append(Comp.Plain("【分P列表】"))
