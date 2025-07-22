@@ -23,6 +23,9 @@ from .QQapi.qqmusic_api.login import check_expired, refresh_cookies
 from quart import Quart, Response
 from aiohttp import web
 
+# 全局凭证文件锁，防止多进程/多线程并发写入
+_credential_file_lock = asyncio.Lock()
+
 
 class QQMusicRoute:
     def __init__(self, app: Quart):
@@ -157,6 +160,35 @@ class QQMusicAPI:
             logger.warning(f"凭证有效性检测失败: {str(e)}")
             return False
 
+    async def _refresh_credential(self) -> bool:
+        """尝试刷新凭证，返回是否成功，详细日志"""
+        if not self.credential:
+            logger.info("无凭证，无法刷新")
+            return False
+        # 检查refresh_key/refresh_token
+        if not hasattr(self.credential, "refresh_key") or not hasattr(self.credential, "refresh_token") or not self.credential.refresh_key or not self.credential.refresh_token:
+            logger.warning("凭证缺少refresh_key/refresh_token，无法刷新，只能扫码登录")
+            return False
+        try:
+            refreshed = await refresh_cookies(self.credential)
+            if refreshed:
+                logger.info("凭证刷新成功")
+                return True
+            else:
+                logger.warning("凭证刷新失败，refresh_cookies返回False")
+                return False
+        except Exception as e:
+            logger.error(f"凭证刷新异常: {str(e)}")
+            return False
+
+    async def force_relogin(self):
+        """强制重新登录，清理凭证并扫码"""
+        async with self.credential_lock:
+            self._clear_credential()
+            self.credential = None
+            logger.info("已强制清理凭证，准备扫码登录")
+            await self.ensure_login()
+
     async def ensure_login(self) -> bool:
         """确保已登录QQ音乐
 
@@ -170,17 +202,11 @@ class QQMusicAPI:
                     return True
                 else:
                     logger.info("检测到QQ音乐凭证已过期，尝试刷新凭证...")
-                    try:
-                        refreshed = await refresh_cookies(self.credential)
-                        if refreshed:
-                            logger.info("凭证刷新成功")
-                            return True
-                        else:
-                            logger.info("凭证刷新失败，清理本地凭证，准备重新登录")
-                            self._clear_credential()
-                            self.credential = None
-                    except Exception as e:
-                        logger.info(f"凭证刷新异常: {str(e)}，清理本地凭证，准备重新登录")
+                    refreshed = await self._refresh_credential()
+                    if refreshed:
+                        return True
+                    else:
+                        logger.info("凭证刷新失败或无法刷新，清理本地凭证，准备重新登录")
                         self._clear_credential()
                         self.credential = None
 
@@ -192,17 +218,11 @@ class QQMusicAPI:
                     return True
                 else:
                     logger.info("检测到本地凭证已过期，尝试刷新凭证...")
-                    try:
-                        refreshed = await refresh_cookies(self.credential)
-                        if refreshed:
-                            logger.info("凭证刷新成功")
-                            return True
-                        else:
-                            logger.info("凭证刷新失败，清理本地凭证，准备重新登录")
-                            self._clear_credential()
-                            self.credential = None
-                    except Exception as e:
-                        logger.info(f"凭证刷新异常: {str(e)}，清理本地凭证，准备重新登录")
+                    refreshed = await self._refresh_credential()
+                    if refreshed:
+                        return True
+                    else:
+                        logger.info("凭证刷新失败或无法刷新，清理本地凭证，准备重新登录")
                         self._clear_credential()
                         self.credential = None
 
@@ -276,22 +296,48 @@ class QQMusicAPI:
     def _save_credential(self, credential: Credential):
         """保存登录凭证到文件"""
         data = {
-            "musicid": credential.musicid,
-            "musickey": credential.musickey
+            "musicid": getattr(credential, "musicid", None),
+            "musickey": getattr(credential, "musickey", None),
+            # 兼容refresh_key/refresh_token
+            "refresh_key": getattr(credential, "refresh_key", None),
+            "refresh_token": getattr(credential, "refresh_token", None)
         }
-        with open(self.credential_file, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        try:
+            async def _write():
+                async with _credential_file_lock:
+                    with open(self.credential_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f)
+            asyncio.get_event_loop().run_until_complete(_write())
+        except Exception as e:
+            logger.error(f"保存QQ音乐凭证出错: {str(e)}，数据: {data}")
 
     def _load_credential(self) -> Optional[Credential]:
-        """从文件加载登录凭证"""
+        """从文件加载登录凭证，兼容字段缺失"""
         if not os.path.exists(self.credential_file):
             return None
         try:
-            with open(self.credential_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return Credential(musicid=data["musicid"], musickey=data["musickey"])
+            async def _read():
+                async with _credential_file_lock:
+                    with open(self.credential_file, "r", encoding="utf-8") as f:
+                        return json.load(f)
+            data = asyncio.get_event_loop().run_until_complete(_read())
+            # 字段兼容性检查
+            musicid = data.get("musicid")
+            musickey = data.get("musickey")
+            refresh_key = data.get("refresh_key")
+            refresh_token = data.get("refresh_token")
+            if not musicid or not musickey:
+                logger.error(f"凭证文件缺少必要字段: {data}")
+                return None
+            cred = Credential(musicid=musicid, musickey=musickey)
+            # 动态加refresh_key/refresh_token
+            if refresh_key:
+                setattr(cred, "refresh_key", refresh_key)
+            if refresh_token:
+                setattr(cred, "refresh_token", refresh_token)
+            return cred
         except Exception as e:
-            logger.error(f"加载QQ音乐凭证出错: {str(e)}")
+            logger.error(f"加载QQ音乐凭证出错: {str(e)}，文件内容可能损坏或权限不足")
             return None
 
     async def search(self, keyword: str, limit: int = 5) -> List[Dict]:
