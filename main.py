@@ -1365,27 +1365,11 @@ class SoVitsSvcPlugin(Star):
                     # 优先用歌曲ID+音质做key，支持网易云、QQ音乐、B站
                     song_info = locals().get('song_info')  # 兼容不同来源
                     source_type = locals().get('source_type', None)
-                    chorus_cache_key = None
-                    is_custom_key = False
-                    if source_type == 'qqmusic' and song_info and song_info.get('songmid') and song_info.get('level'):
-                        chorus_cache_key = f"qq_{song_info['songmid']}_{song_info['level']}"
-                        is_custom_key = True
-                    elif source_type == 'bilibili' and song_info and song_info.get('bvid'):
-                        chorus_cache_key = f"bilibili_{song_info['bvid']}"
-                        is_custom_key = True
-                    elif song_info and song_info.get('id') and song_info.get('level'):
-                        chorus_cache_key = f"netease_{song_info['id']}_{song_info['level']}"
-                        is_custom_key = True
-                    else:
-                        original_input_file = input_file
-                        chorus_cache_key = original_input_file
-                        is_custom_key = False
+                    chorus_cache_key, is_custom_key = get_chorus_cache_key(source_type, song_info, input_file)
+                    logger.info(f"副歌缓存key: {chorus_cache_key}, is_custom_key: {is_custom_key}, song_info: {song_info}, source_type: {source_type}")
                     chorus_interval = self.converter.cache_manager.get_chorus_interval(chorus_cache_key, is_custom_key)
                     if chorus_interval:
-                        if is_custom_key:
-                            audio_file_for_cut = input_file
-                        else:
-                            audio_file_for_cut = original_input_file
+                        audio_file_for_cut = input_file if is_custom_key else input_file
                         start = int(chorus_interval["start"] * 1000)
                         end = int(chorus_interval["end"] * 1000)
                         audio = AudioSegment.from_file(audio_file_for_cut)
@@ -1395,14 +1379,11 @@ class SoVitsSvcPlugin(Star):
                         input_file = chorus_path
                         yield event.plain_result(f"副歌区间（缓存）：{start//1000}s - {end//1000}s，已裁切。")
                     else:
-                        if is_custom_key:
-                            audio_file_for_cut = input_file
-                        else:
-                            audio_file_for_cut = original_input_file
+                        audio_file_for_cut = input_file if is_custom_key else input_file
                         with open(audio_file_for_cut, "rb") as f:
                             audio_bytes = f.read()
                         volc_conf = self.config.get("volc_chorus", {})
-                        print("volc_conf:", volc_conf)  # 调试打印
+                        logger.info(f"副歌检测API请求: key={chorus_cache_key}, is_custom_key={is_custom_key}")
                         chorus_result = await detect_chorus_api(audio_bytes, volc_conf)
                         if chorus_result.get("msg") == "success":
                             start = int(chorus_result["chorus"]["start"] * 1000)  # ms
@@ -1416,6 +1397,7 @@ class SoVitsSvcPlugin(Star):
                             self.converter.cache_manager.save_chorus_interval(
                                 chorus_cache_key, chorus_result["chorus"], is_custom_key
                             )
+                            logger.info(f"副歌区间写入缓存: key={chorus_cache_key}, is_custom_key={is_custom_key}, value={chorus_result['chorus']}")
                             yield event.plain_result(f"副歌区间：{start//1000}s - {end//1000}s，已裁切。")
                         else:
                             yield event.plain_result("副歌检测失败：" + str(chorus_result))
@@ -1949,3 +1931,13 @@ class SoVitsSvcPlugin(Star):
 
         except Exception as e:
             yield event.plain_result(f"获取模型列表失败：{str(e)}\n{traceback.format_exc()}")
+
+def get_chorus_cache_key(source_type, song_info, input_file):
+    if source_type == 'qqmusic' and song_info and song_info.get('songmid') and song_info.get('level'):
+        return f"qq_{song_info['songmid']}_{song_info['level']}", True
+    elif source_type == 'bilibili' and song_info and song_info.get('bvid'):
+        return f"bilibili_{song_info['bvid']}", True
+    elif source_type == 'netease' and song_info and song_info.get('id') and song_info.get('level'):
+        return f"netease_{song_info['id']}_{song_info['level']}", True
+    else:
+        return input_file, False
