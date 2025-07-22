@@ -1306,15 +1306,17 @@ class SoVitsSvcPlugin(Star):
                         )
                         return
 
-                    result_msg = (
-                        f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
-                        f"音质：{song_info.get('level', '未知音质')}\n"
-                        f"大小：{song_info.get('size', '未知大小')}\n"
-                    )
+                    chain = [
+                        Comp.Plain(f"找到歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}"),
+                        Comp.Plain(f"音质：{song_info.get('level', '未知音质')}"),
+                        Comp.Plain(f"大小：{song_info.get('size', '未知大小')}")
+                    ]
                     if model_dir:
-                        result_msg += f"使用模型目录：{model_dir}\n"
-                    result_msg += "正在下载..."
-                    yield event.plain_result(result_msg)
+                        chain.append(Comp.Plain(f"使用模型目录：{model_dir}"))
+                    if song_info.get('pic'):
+                        chain.append(Comp.Image.fromURL(song_info['pic']))
+                    chain.append(Comp.Plain("正在下载..."))
+                    yield event.chain_result(chain)
 
                     downloaded_file = await self.converter.netease_api.download_song(
                         song_info, self.temp_dir
