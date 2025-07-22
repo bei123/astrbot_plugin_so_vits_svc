@@ -34,6 +34,7 @@ import traceback
 from pydub import AudioSegment
 from .song import detect_chorus_api
 import astrbot.api.message_components as Comp
+import re
 
 class MSSTProcessor:
     """MSST 音频处理器"""
@@ -1848,7 +1849,8 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"正在获取视频信息：{url_or_bvid}...")
 
             cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
-            video_info = await bilibili_api.fetch_bilibili_video_info(url_or_bvid, cookie=cookie)
+            bvid = extract_bvid(url_or_bvid)
+            video_info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
 
             if not video_info:
                 yield event.plain_result(f"获取视频信息失败：{url_or_bvid}")
@@ -1990,3 +1992,10 @@ def get_chorus_cache_key(source_type, song_info, input_file):
         return f"netease_{song_info['id']}_{song_info['level']}", True
     else:
         return input_file, False
+
+def extract_bvid(text):
+    """从文本或URL中提取BV号"""
+    match = re.search(r'(BV[0-9A-Za-z]+)', text)
+    if match:
+        return match.group(1)
+    return text.strip()
