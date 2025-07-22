@@ -260,4 +260,5 @@ class CacheManager:
         if cache_key not in index:
             index[cache_key] = {"timestamp": time.time()}
         index[cache_key]['chorus_interval'] = interval
+        print(f"写入副歌区间缓存: {cache_key} -> {interval}")  # 调试输出
         self._save_index(index)
