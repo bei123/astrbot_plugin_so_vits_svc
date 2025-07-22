@@ -1323,6 +1323,7 @@ class SoVitsSvcPlugin(Star):
                         detail = await self.converter.netease_api.get_song_detail(song_info['id'])
                         if detail and detail.get('picUrl'):
                             song_info['pic'] = detail['picUrl']
+                            chain.append(Comp.Image.fromURL(song_info['pic']))
                     yield event.chain_result(chain)
 
                     downloaded_file = await self.converter.netease_api.download_song(
