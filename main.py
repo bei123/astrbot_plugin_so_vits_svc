@@ -1234,23 +1234,29 @@ class SoVitsSvcPlugin(Star):
                         yield event.plain_result("QQ音乐登录失败，请检查配置或重新登录")
                         return
 
-                    song_info = await self.converter.qqmusic_api.get_song_with_highest_quality(song_name)
+                    song_info_raw = await self.converter.qqmusic_api.get_song_with_highest_quality(song_name)
 
-                    if not song_info:
+                    if not song_info_raw:
                         yield event.plain_result(f"未找到QQ音乐歌曲：{song_name}")
                         return
 
-                    if not song_info.get("url"):
+                    if not song_info_raw.get("url"):
                         yield event.plain_result("无法获取QQ音乐下载链接，可能是版权限制")
                         return
 
+                    # 标准化 song_info 字段
+                    song_info = {
+                        "songmid": song_info_raw.get("mid") or song_info_raw.get("songmid"),
+                        "level": song_info_raw.get("level")
+                    }
+
                     yield event.plain_result(
-                        f"找到QQ音乐歌曲：{song_info.get('name', '未知歌曲')} - {song_info.get('ar_name', '未知歌手')}\n"
-                        f"音质：{song_info.get('level', '未知音质')}\n"
+                        f"找到QQ音乐歌曲：{song_info_raw.get('name', '未知歌曲')} - {song_info_raw.get('ar_name', '未知歌手')}\n"
+                        f"音质：{song_info_raw.get('level', '未知音质')}\n"
                         f"正在下载..."
                     )
 
-                    downloaded_file = await self.converter.qqmusic_api.download_song(song_info, self.temp_dir)
+                    downloaded_file = await self.converter.qqmusic_api.download_song(song_info_raw, self.temp_dir)
                     if not downloaded_file:
                         yield event.plain_result("下载QQ音乐歌曲失败！")
                         return
