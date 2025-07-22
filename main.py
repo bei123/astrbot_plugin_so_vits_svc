@@ -1425,7 +1425,7 @@ class SoVitsSvcPlugin(Star):
                                 chorus_cache_key, chorus_result["chorus"], is_custom_key
                             )
                             logger.info(f"副歌区间写入缓存: key={chorus_cache_key}, is_custom_key={is_custom_key}, value={chorus_result['chorus']}")
-                            yield event.plain_result(f"副歌区间：{start//1000}s - {end//1000}s，已裁切。")
+                            # yield event.plain_result(f"副歌区间：{start//1000}s - {end//1000}s，已裁切。")
                         else:
                             yield event.plain_result("副歌检测失败：" + str(chorus_result))
                             return
