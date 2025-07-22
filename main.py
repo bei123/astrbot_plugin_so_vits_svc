@@ -1176,15 +1176,17 @@ class SoVitsSvcPlugin(Star):
                         Comp.Plain(f"正在处理哔哩哔哩视频：{song_name} (BV号: {bvid})"),
                     ]
                     if info:
-                        chain.append(Comp.Plain("视频信息："))
+                        chain.append(Comp.Plain(""))
+                        chain.append(Comp.Plain("【视频信息】"))
                         chain.append(Comp.Plain(f"标题：{info.get('title', '未知')}"))
                         chain.append(Comp.Plain(f"UP主：{info.get('uploader', '未知')}"))
                         chain.append(Comp.Plain(f"分P数量：{len(info.get('parts', []))}"))
                         if info.get('parts'):
-                            part_list = ""
+                            chain.append(Comp.Plain(""))
+                            chain.append(Comp.Plain("【分P列表】"))
                             for part in info['parts']:
-                                part_list += f"{part.get('index', '?')}. {part.get('title', '未知')} ({part.get('duration', '?')})\n"
-                            chain.append(Comp.Plain("分P列表：\n" + part_list))
+                                chain.append(Comp.Plain(f"{part.get('index', '?')}. {part.get('title', '未知')} ({part.get('duration', '?')})"))
+                            chain.append(Comp.Plain(""))
                         if info.get('pic'):
                             chain.append(Comp.Image.fromURL(info['pic']))
                     yield event.chain_result(chain)
