@@ -1154,8 +1154,7 @@ class SoVitsSvcPlugin(Star):
             # 生成任务ID
             task_id = str(uuid.uuid4())
 
-            # 根据来源类型处理音频
-            source_type = None
+            # 统一用 source_type 进入分支
             song_info = None
             if source_type == "bilibili" and song_name:
                 # ...原有bilibili分支...
@@ -1170,7 +1169,7 @@ class SoVitsSvcPlugin(Star):
                 if song_info:
                     song_info = {"songmid": song_info.get("songmid"), "level": song_info.get("level")}
                 # ...
-            elif song_name:
+            elif source_type == "netease" and song_name:
                 # ...原有网易云分支...
                 source_type = "netease"
                 # song_info = ...
