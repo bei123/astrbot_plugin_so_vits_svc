@@ -1267,8 +1267,16 @@ class SoVitsSvcPlugin(Star):
                         Comp.Plain(f"音质：{song_info_raw.get('level', '未知音质')}"),
                         Comp.Plain("正在下载...")
                     ]
-                    if song_info_raw.get('pic'):
-                        chain.append(Comp.Image.fromURL(self.converter.qqmusic_api.get_song_image_url(song_info_raw['mid'])))
+
+                    # 优先用pic字段（如果有），否则用mid生成图片URL
+                    pic_url = song_info_raw.get('pic')
+                    if not pic_url and song_info_raw.get('mid'):
+                        # get_song_image_url 通常是静态方法，也可以直接调用
+                        pic_url = self.converter.qqmusic_api.get_song_image_url(song_info_raw.get('mid'))
+
+                    if pic_url:
+                        chain.append(Comp.Image.fromURL(pic_url))
+
                     yield event.chain_result(chain)
 
                     downloaded_file = await self.converter.qqmusic_api.download_song(song_info_raw, self.temp_dir)
