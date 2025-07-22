@@ -867,7 +867,7 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件",
-    version="1.3.3",
+    version="1.3.4",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -1160,7 +1160,7 @@ class SoVitsSvcPlugin(Star):
             if source_type == "bilibili" and song_name:
                 # ...原有bilibili分支...
                 source_type = "bilibili"
-                # video_info = ...
+                video_info = self.converter.bilibili_api.process_video(song_name)
                 song_info = {"bvid": video_info.get("bvid") or video_info.get("bvid", None)}
                 # ...
             elif source_type == "qqmusic" and song_name:
@@ -1391,8 +1391,8 @@ class SoVitsSvcPlugin(Star):
                 try:
                     # 副歌检测前，先查缓存
                     # 优先用歌曲ID+音质做key，支持网易云、QQ音乐、B站
-                    song_info = locals().get('song_info')  # 兼容不同来源
-                    source_type = locals().get('source_type', None)
+                    song_info = locals().get("song_info")  # 兼容不同来源
+                    source_type = locals().get("source_type", None)
                     chorus_cache_key, is_custom_key = get_chorus_cache_key(source_type, song_info, input_file)
                     logger.info(f"副歌缓存key: {chorus_cache_key}, is_custom_key: {is_custom_key}, song_info: {song_info}, source_type: {source_type}")
                     chorus_interval = self.converter.cache_manager.get_chorus_interval(chorus_cache_key, is_custom_key)
@@ -1961,11 +1961,11 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取模型列表失败：{str(e)}\n{traceback.format_exc()}")
 
 def get_chorus_cache_key(source_type, song_info, input_file):
-    if source_type == 'qqmusic' and song_info and song_info.get('songmid') and song_info.get('level'):
+    if source_type == "qqmusic" and song_info and song_info.get("songmid") and song_info.get("level"):
         return f"qq_{song_info['songmid']}_{song_info['level']}", True
-    elif source_type == 'bilibili' and song_info and song_info.get('bvid'):
+    elif source_type == "bilibili" and song_info and song_info.get("bvid"):
         return f"bilibili_{song_info['bvid']}", True
-    elif source_type == 'netease' and song_info and song_info.get('id') and song_info.get('level'):
+    elif source_type == "netease" and song_info and song_info.get("id") and song_info.get("level"):
         return f"netease_{song_info['id']}_{song_info['level']}", True
     else:
         return input_file, False
