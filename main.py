@@ -1083,6 +1083,7 @@ class SoVitsSvcPlugin(Star):
                 only_chorus = True
                 args.remove("-c")
 
+            # 参数解析阶段，只设置变量，不做下载和处理
             if len(args) >= 2:
                 speaker_id = args[0]
                 try:
@@ -1157,61 +1158,7 @@ class SoVitsSvcPlugin(Star):
 
             # 统一用 source_type 进入分支
             song_info = None
-            if source_type == "bilibili" and song_name:
-                # ...原有bilibili分支...
-                source_type = "bilibili"
-                # 直接调用bilibili_api的异步下载
-                bvid = song_name.strip()
-                yield event.plain_result(f"正在处理哔哩哔哩视频：{bvid}...")
-                cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
-                await bilibili_api.bilibili_download_api(bvid, self.temp_dir, only_audio=True, cookie=cookie)
-                # 查找下载的音频文件（支持多种格式，优先无损）
-                audio_file = None
-                audio_ext_priority = ['.flac', '.wav', '.m4a', '.mp3', '.m4s']
-                for ext in audio_ext_priority:
-                    for f in os.listdir(self.temp_dir):
-                        if f.endswith(ext):
-                            audio_file = os.path.join(self.temp_dir, f)
-                            break
-                    if audio_file:
-                        break
-                if not audio_file or not os.path.exists(audio_file):
-                    yield event.plain_result("下载音频失败！")
-                    return
-                # 如需统一格式，自动转为wav
-                if not audio_file.endswith('.wav'):
-                    import subprocess
-                    wav_file = os.path.splitext(audio_file)[0] + '.wav'
-                    subprocess.run(['ffmpeg', '-y', '-i', audio_file, wav_file])
-                    audio_file = wav_file
-                # 获取视频信息
-                cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
-                info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
-                song_info = {"bvid": bvid}
-                # 复制音频到input_file
-                import shutil
-                shutil.copy(audio_file, input_file)
-                # ...
-            elif source_type == "qqmusic" and song_name:
-                # ...原有qqmusic分支...
-                source_type = "qqmusic"
-                # song_info = ...
-                if song_info:
-                    song_info = {"songmid": song_info.get("songmid"), "level": song_info.get("level")}
-                # ...
-            elif source_type == "netease" and song_name:
-                # ...原有网易云分支...
-                source_type = "netease"
-                # song_info = ...
-                if song_info:
-                    song_info = {"id": song_info.get("id"), "level": song_info.get("level")}
-                # ...
-            else:
-                # 文件上传分支
-                source_type = "file"
-                song_info = None
-
-            # 根据来源类型处理音频
+            # 只保留一次bilibili实际处理分支
             if source_type == "bilibili" and song_name:
                 try:
                     yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
