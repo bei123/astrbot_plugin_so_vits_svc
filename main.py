@@ -1161,11 +1161,29 @@ class SoVitsSvcPlugin(Star):
             # 只保留一次bilibili实际处理分支
             if source_type == "bilibili" and song_name:
                 try:
-                    yield event.plain_result(f"正在处理哔哩哔哩视频：{song_name}...")
-
                     # 用正则提取BV号
                     bvid = extract_bvid(song_name.strip())
                     cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
+
+                    # 获取视频信息
+                    info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
+                    song_info = {"bvid": bvid}
+
+                    # 合并输出视频信息和处理提示
+                    result = f"正在处理哔哩哔哩视频：{song_name} (BV号: {bvid})\n"
+                    if info:
+                        result += "\n视频信息：\n"
+                        result += f"标题：{info.get('title', '未知')}\n"
+                        result += f"UP主：{info.get('uploader', '未知')}\n"
+                        result += f"分P数量：{len(info.get('parts', []))}\n"
+                        if info.get('parts'):
+                            result += "分P列表：\n"
+                            for part in info['parts']:
+                                result += f"{part.get('index', '?')}. {part.get('title', '未知')} ({part.get('duration', '?')})\n"
+                        result += f"\n使用方法：/唱 [说话人ID] [音调调整] bilibili {bvid}"
+                        if info.get('pic'):
+                            result += f"\n封面：{info['pic']}"
+                    yield event.plain_result(result)
 
                     # 下载前清理临时目录，避免历史文件干扰
                     for f in os.listdir(self.temp_dir):
@@ -1199,10 +1217,6 @@ class SoVitsSvcPlugin(Star):
                         wav_file = os.path.splitext(audio_file)[0] + '.wav'
                         subprocess.run(['ffmpeg', '-y', '-i', audio_file, wav_file])
                         audio_file = wav_file
-
-                    # 获取视频信息
-                    info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
-                    song_info = {"bvid": bvid}
 
                     # 复制音频到input_file
                     import shutil
