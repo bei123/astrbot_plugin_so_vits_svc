@@ -1162,7 +1162,7 @@ class SoVitsSvcPlugin(Star):
                 source_type = "bilibili"
                 # 直接调用bilibili_api的异步下载
                 bvid = song_name.strip()
-                await event.plain_result(f"正在处理哔哩哔哩视频：{bvid}...")
+                yield event.plain_result(f"正在处理哔哩哔哩视频：{bvid}...")
                 cookie = self.config.get("base_setting", {}).get("bbdown_cookie", "")
                 await bilibili_api.bilibili_download_api(bvid, self.temp_dir, only_audio=True, cookie=cookie)
                 # 查找下载的音频文件（支持多种格式，优先无损）
