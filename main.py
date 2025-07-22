@@ -1387,7 +1387,7 @@ class SoVitsSvcPlugin(Star):
 
             # 音频文件准备好后，推理前裁切副歌
             if only_chorus:
-                yield event.plain_result("正在检测副歌区间并裁切...")
+                # yield event.plain_result("正在检测副歌区间并裁切...")
                 try:
                     # 副歌检测前，先查缓存
                     # 优先用歌曲ID+音质做key，支持网易云、QQ音乐、B站
@@ -1435,7 +1435,7 @@ class SoVitsSvcPlugin(Star):
                     return
 
             # 开始处理流程
-            yield event.plain_result("正在使用MSST分离人声和伴奏...")
+            # yield event.plain_result("正在使用MSST分离人声和伴奏...")
 
             # 使用MSST分离人声和伴奏
             msst_result = await self.converter.msst_processor.process_audio(
@@ -1494,7 +1494,7 @@ class SoVitsSvcPlugin(Star):
                 return
 
             # 转换人声
-            yield event.plain_result("正在转换人声...")
+            # yield event.plain_result("正在转换人声...")
             try:
                 # 创建异步任务
                 convert_task = asyncio.create_task(
@@ -1531,7 +1531,7 @@ class SoVitsSvcPlugin(Star):
 
             # 混音处理
             if self.converter.enable_mixing:
-                yield event.plain_result("正在混音处理...")
+                # yield event.plain_result("正在混音处理...")
                 try:
                     mix_success = self.converter.mix_audio(
                         vocal_path=output_file,  # 使用转换后的人声
