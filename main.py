@@ -1405,7 +1405,7 @@ class SoVitsSvcPlugin(Star):
                         chorus_path = audio_file_for_cut.replace(".wav", "_chorus.wav")
                         chorus_audio.export(chorus_path, format="wav")
                         input_file = chorus_path
-                        yield event.plain_result(f"副歌区间（缓存）：{start//1000}s - {end//1000}s，已裁切。")
+                        # yield event.plain_result(f"副歌区间（缓存）：{start//1000}s - {end//1000}s，已裁切。")
                     else:
                         audio_file_for_cut = input_file if is_custom_key else input_file
                         with open(audio_file_for_cut, "rb") as f:
