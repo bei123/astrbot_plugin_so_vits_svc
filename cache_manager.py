@@ -236,37 +236,38 @@ class CacheManager:
         except Exception as e:
             logger.error(f"清空缓存失败: {str(e)}")
 
-    def get_chorus_interval(self, cache_key_or_file: str, is_custom_key: bool = False) -> Optional[dict]:
-        """获取副歌区间缓存，支持自定义key或文件hash
-        Args:
-            cache_key_or_file: 自定义key（如歌曲ID+音质）或音频文件路径
-            is_custom_key: 是否为自定义key
-        Returns:
-            副歌区间dict，没有则返回None
-        """
-        if is_custom_key:
-            cache_key = cache_key_or_file
-        else:
-            cache_key = self._generate_cache_key(cache_key_or_file, '', 0)
-        index = self._load_index()
-        if cache_key in index and 'chorus_interval' in index[cache_key]:
-            return index[cache_key]['chorus_interval']
-        return None
+    @property
+    def chorus_cache_file(self):
+        return os.path.join(self.cache_dir, "chorus_cache.json")
 
-    def save_chorus_interval(self, cache_key_or_file: str, interval: dict, is_custom_key: bool = False):
-        """保存副歌区间到缓存，支持自定义key或文件hash
-        Args:
-            cache_key_or_file: 自定义key（如歌曲ID+音质）或音频文件路径
-            interval: 副歌区间dict
-            is_custom_key: 是否为自定义key
-        """
-        if is_custom_key:
-            cache_key = cache_key_or_file
-        else:
-            cache_key = self._generate_cache_key(cache_key_or_file, '', 0)
-        index = self._load_index()
-        if cache_key not in index:
-            index[cache_key] = {"timestamp": time.time()}
-        index[cache_key]['chorus_interval'] = interval
-        logger.info(f"写入副歌区间缓存: {cache_key} -> {interval}")
-        self._save_index(index)
+    def _load_chorus_cache(self) -> dict:
+        try:
+            if not os.path.exists(self.chorus_cache_file):
+                return {}
+            with open(self.chorus_cache_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"加载副歌区间缓存失败: {str(e)}")
+            return {}
+
+    def _save_chorus_cache(self, cache: dict):
+        try:
+            with open(self.chorus_cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存副歌区间缓存失败: {str(e)}")
+
+    def get_chorus_interval(self, cache_key: str, is_custom_key: bool = False) -> dict:
+        cache = self._load_chorus_cache()
+        logger.info(f"[副歌区间缓存] 读取keys: {list(cache.keys())}")
+        logger.info(f"[副歌区间缓存] 查找key: {cache_key}, 命中: {cache_key in cache}")
+        return cache.get(cache_key)
+
+    def save_chorus_interval(self, cache_key: str, interval: dict, is_custom_key: bool = False):
+        cache = self._load_chorus_cache()
+        cache[cache_key] = interval
+        logger.info(f"[副歌区间缓存] 写入: {cache_key} -> {interval}")
+        self._save_chorus_cache(cache)
+        # 写入后立即读取并打印
+        cache2 = self._load_chorus_cache()
+        logger.info(f"[副歌区间缓存] 写入后立即读取: {cache_key} in cache2: {cache_key in cache2}, interval: {cache2.get(cache_key)}")
