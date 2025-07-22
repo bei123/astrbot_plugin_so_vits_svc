@@ -332,4 +332,16 @@ def get_song_image_url(mid: str, size: int = 300) -> str:
     Returns:
         歌曲图片URL
     """
-    return f"https://y.qq.com/music/photo_new/T002R{size}x{size}M000{mid}_1.jpg?max_age=2592000"
+    return f"https://y.qq.com/music/photo_new/T002R{size}x{size}M000{mid}.jpg"
+
+
+# def get_album_image_url(mid: str, size: int = 300) -> str:
+#     """获取专辑图片URL
+
+#     Args:
+#         mid: 专辑mid
+#         size: 图片尺寸（如300、500等，默认为300）
+#     Returns:
+#         专辑图片URL
+#     """
+#     return f"https://y.qq.com/music/photo_new/T002R{size}x{size}M000{mid}.jpg?max_age=2592000"

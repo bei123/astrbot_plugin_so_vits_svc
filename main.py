@@ -1269,12 +1269,12 @@ class SoVitsSvcPlugin(Star):
                     ]
 
                     # 优先用pic字段（如果有），否则用mid生成图片URL
-                    pic_url = song_info_raw.get('pic')
-                    if not pic_url and song_info_raw.get('mid'):
-                        pic_url = await self.converter.qqmusic_api.get_song_image_url(song_info_raw.get('mid'))
+                    # pic_url = song_info_raw.get('pic')
+                    # if not pic_url and song_info_raw.get('mid'):
+                    #     pic_url = await self.converter.qqmusic_api.get_song_image_url(song_info_raw.get('mid'))
 
-                    if pic_url:
-                        chain.append(Comp.Image.fromURL(pic_url))
+                    # if pic_url:
+                    #     chain.append(Comp.Image.fromURL(pic_url))
 
                     yield event.chain_result(chain)
 
