@@ -211,7 +211,8 @@ class NeteaseMusicAPI:
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url=url, data=data) as response:
-                result = await response.json()
+                # 关键：忽略content_type
+                result = await response.json(content_type=None)
 
         if "songs" in result and result["songs"]:
             song = result["songs"][0]
