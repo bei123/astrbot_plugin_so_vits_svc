@@ -321,3 +321,15 @@ async def get_fav_num(songid: list[int]):
     # {'m_numbers': {'438910555': 1000001}, 'm_show': {'438910555': '550w+'}}
     # 暂时选择 m_show 方便阅读
     return {"v_songId": songid}, _get_extract_func("m_show")
+
+
+def get_song_image_url(mid: str, size: int = 300) -> str:
+    """获取歌曲图片URL
+
+    Args:
+        mid: 歌曲mid
+        size: 图片尺寸（如300、500等，默认为300）
+    Returns:
+        歌曲图片URL
+    """
+    return f"https://y.qq.com/music/photo_new/T002R{size}x{size}M000{mid}.jpg"

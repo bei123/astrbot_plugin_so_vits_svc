@@ -336,7 +336,11 @@ class QQMusicAPI:
         except Exception as e:
             logger.error(f"加载QQ音乐凭证出错: {str(e)}，文件内容可能损坏或权限不足")
             return None
-
+    async def get_song_image_url(self, mid: str, size: int = 300) -> str:
+        """获取歌曲图片URL
+        """
+        return song.get_song_image_url(mid, size)
+    
     async def search(self, keyword: str, limit: int = 5) -> List[Dict]:
         """搜索歌曲
 

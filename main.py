@@ -1257,11 +1257,19 @@ class SoVitsSvcPlugin(Star):
                         "level": song_info_raw.get("level")
                     }
 
-                    yield event.plain_result(
-                        f"找到QQ音乐歌曲：{song_info_raw.get('name', '未知歌曲')} - {song_info_raw.get('ar_name', '未知歌手')}\n"
-                        f"音质：{song_info_raw.get('level', '未知音质')}\n"
-                        f"正在下载..."
-                    )
+                    # yield event.plain_result(
+                    #     f"找到QQ音乐歌曲：{song_info_raw.get('name', '未知歌曲')} - {song_info_raw.get('ar_name', '未知歌手')}\n"
+                    #     f"音质：{song_info_raw.get('level', '未知音质')}\n"
+                    #     f"正在下载..."
+                    # )
+                    chain = [
+                        Comp.Plain(f"找到QQ音乐歌曲：{song_info_raw.get('name', '未知歌曲')} - {song_info_raw.get('ar_name', '未知歌手')}"),
+                        Comp.Plain(f"音质：{song_info_raw.get('level', '未知音质')}"),
+                        Comp.Plain("正在下载...")
+                    ]
+                    if song_info_raw.get('pic'):
+                        chain.append(Comp.Image.fromURL(self.converter.qqmusic_api.get_song_image_url(song_info_raw['mid'])))
+                    yield event.chain_result(chain)
 
                     downloaded_file = await self.converter.qqmusic_api.download_song(song_info_raw, self.temp_dir)
                     if not downloaded_file:
