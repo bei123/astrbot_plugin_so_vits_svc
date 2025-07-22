@@ -22,6 +22,7 @@ from .QQapi.qqmusic_api.utils.credential import Credential
 from .QQapi.qqmusic_api.login import check_expired, refresh_cookies
 from quart import Quart, Response
 from aiohttp import web
+import aiofiles
 
 # 全局凭证文件锁，防止多进程/多线程并发写入
 _credential_file_lock = asyncio.Lock()
@@ -211,7 +212,7 @@ class QQMusicAPI:
                         self.credential = None
 
             # 尝试加载已保存的凭证
-            self.credential = self._load_credential()
+            self.credential = await self._load_credential()
             if self.credential:
                 logger.info("已加载保存的QQ音乐登录凭证，检测有效性...")
                 if await self._is_credential_valid():
@@ -275,7 +276,7 @@ class QQMusicAPI:
                     if event == QRCodeLoginEvents.DONE and credential:
                         logger.info("QQ音乐登录成功！")
                         # 保存凭证
-                        self._save_credential(credential)
+                        await self._save_credential(credential)
                         self.credential = credential
                         return True
                     elif event == QRCodeLoginEvents.SCAN:
@@ -293,34 +294,30 @@ class QQMusicAPI:
                 logger.error(f"QQ音乐登录出错: {str(e)}")
                 return False
 
-    def _save_credential(self, credential: Credential):
-        """保存登录凭证到文件"""
+    async def _save_credential(self, credential: Credential):
+        """异步保存登录凭证到文件"""
         data = {
             "musicid": getattr(credential, "musicid", None),
             "musickey": getattr(credential, "musickey", None),
-            # 兼容refresh_key/refresh_token
             "refresh_key": getattr(credential, "refresh_key", None),
             "refresh_token": getattr(credential, "refresh_token", None)
         }
         try:
-            async def _write():
-                async with _credential_file_lock:
-                    with open(self.credential_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f)
-            asyncio.get_event_loop().run_until_complete(_write())
+            async with _credential_file_lock:
+                async with aiofiles.open(self.credential_file, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(data))
         except Exception as e:
             logger.error(f"保存QQ音乐凭证出错: {str(e)}，数据: {data}")
 
-    def _load_credential(self) -> Optional[Credential]:
-        """从文件加载登录凭证，兼容字段缺失"""
+    async def _load_credential(self) -> Optional[Credential]:
+        """异步从文件加载登录凭证，兼容字段缺失"""
         if not os.path.exists(self.credential_file):
             return None
         try:
-            async def _read():
-                async with _credential_file_lock:
-                    with open(self.credential_file, "r", encoding="utf-8") as f:
-                        return json.load(f)
-            data = asyncio.get_event_loop().run_until_complete(_read())
+            async with _credential_file_lock:
+                async with aiofiles.open(self.credential_file, "r", encoding="utf-8") as f:
+                    content = await f.read()
+                    data = json.loads(content)
             # 字段兼容性检查
             musicid = data.get("musicid")
             musickey = data.get("musickey")
