@@ -290,7 +290,6 @@ class VoiceConverter:
         # 初始化组件
         self.msst_processor = MSSTProcessor(self.msst_url)
         self.netease_api = NeteaseMusicAPI(self.config)
-        self.bilibili_api = bilibili_api.BilibiliAPI(self.config)  # 立即初始化 converter
         self.qqmusic_api = QQMusicAPI(self.config)
 
         # 初始化缓存管理器
