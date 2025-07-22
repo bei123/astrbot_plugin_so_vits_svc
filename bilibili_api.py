@@ -119,90 +119,91 @@ async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=
         return
     cid = info['cid']
     title = sanitize_filename(info['title'])
-    img_key, sub_key = await getWbiKeys(session, headers)
-    params = {
-        'bvid': bvid,
-        'cid': cid,
-        'qn': qn,
-        'fnval': fnval,
-        'fnver': '0',
-        'fourk': '1',
-        'otype': 'json',
-        'platform': 'web',
-    }
-    signed_params = encWbi(params, img_key, sub_key)
-    stream_url = "https://api.bilibili.com/x/player/wbi/playurl"
-    async with session.get(stream_url, params=signed_params, headers=headers) as stream_resp:
-        stream_resp.raise_for_status()
-        stream_data = await stream_resp.json()
-    data = stream_data.get('data', {})
-    if 'dash' in data:
-        dash = data['dash']
-        # 打印所有可用音频流信息
-        print('可用音频流：')
-        for a in dash['audio']:
-            print(f"id={a['id']} 码率={a['bandwidth']//1000}kbps 编码={a['codecs']} baseUrl={a['baseUrl']}")
-        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
-            f = dash['flac']['audio']
-            print(f"无损音频流: id={f['id']} 码率={f['bandwidth']//1000}kbps 编码={f['codecs']} baseUrl={f['baseUrl']}")
-        # 优先选择flac无损音轨
-        audio_url = None
-        audio_desc = None
-        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
-            f = dash['flac']['audio']
-            audio_url = unescape_url(f['baseUrl'])
-            audio_desc = f['id']
-        else:
-            audio_quality_priority = [30250, 30280, 30232, 30216]
-            for q in audio_quality_priority:
-                for audio in dash['audio']:
-                    if audio.get('id') == q:
-                        audio_url = unescape_url(audio['baseUrl'])
-                        audio_desc = q
+    async with aiohttp.ClientSession() as session:
+        img_key, sub_key = await getWbiKeys(session, headers)
+        params = {
+            'bvid': bvid,
+            'cid': cid,
+            'qn': qn,
+            'fnval': fnval,
+            'fnver': '0',
+            'fourk': '1',
+            'otype': 'json',
+            'platform': 'web',
+        }
+        signed_params = encWbi(params, img_key, sub_key)
+        stream_url = "https://api.bilibili.com/x/player/wbi/playurl"
+        async with session.get(stream_url, params=signed_params, headers=headers) as stream_resp:
+            stream_resp.raise_for_status()
+            stream_data = await stream_resp.json()
+        data = stream_data.get('data', {})
+        if 'dash' in data:
+            dash = data['dash']
+            # 打印所有可用音频流信息
+            print('可用音频流：')
+            for a in dash['audio']:
+                print(f"id={a['id']} 码率={a['bandwidth']//1000}kbps 编码={a['codecs']} baseUrl={a['baseUrl']}")
+            if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+                f = dash['flac']['audio']
+                print(f"无损音频流: id={f['id']} 码率={f['bandwidth']//1000}kbps 编码={f['codecs']} baseUrl={f['baseUrl']}")
+            # 优先选择flac无损音轨
+            audio_url = None
+            audio_desc = None
+            if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+                f = dash['flac']['audio']
+                audio_url = unescape_url(f['baseUrl'])
+                audio_desc = f['id']
+            else:
+                audio_quality_priority = [30250, 30280, 30232, 30216]
+                for q in audio_quality_priority:
+                    for audio in dash['audio']:
+                        if audio.get('id') == q:
+                            audio_url = unescape_url(audio['baseUrl'])
+                            audio_desc = q
+                            break
+                    if audio_url:
                         break
-                if audio_url:
-                    break
-            if not audio_url:
-                audio_url = unescape_url(dash['audio'][0]['baseUrl'])
-                audio_desc = dash['audio'][0].get('id')
-        video_url = unescape_url(dash['video'][0]['baseUrl'])
-        audio_path = os.path.join(save_dir, 'audio.m4s')
-        if only_audio:
-            print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
-            await download_file(session, audio_url, audio_path, headers)
-            print(f"[DASH] 音频流已保存为: {audio_path}")
-            # 转为mp3
-            output_mp3 = os.path.join(save_dir, f"{title}.mp3")
-            print(f"[DASH] 正在转换音频流为: {output_mp3}")
-            try:
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'libmp3lame', output_mp3
-                ], check=True)
-                print(f"[DASH] 转换完成: {output_mp3}")
-                os.remove(audio_path)
-            except Exception as e:
-                print("[DASH] 音频转换失败，请手动转换。错误：", e)
-        else:
-            video_path = os.path.join(save_dir, 'video.m4s')
-            print("[DASH] 正在下载视频流...")
-            await download_file(session, video_url, video_path, headers)
-            print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
-            await download_file(session, audio_url, audio_path, headers)
-            print(f"[DASH] 视频流已保存为: {video_path}")
-            print(f"[DASH] 音频流已保存为: {audio_path}")
-            # 合并音视频流
-            output_mp4 = os.path.join(save_dir, f"{title}.mp4")
-            print(f"[DASH] 正在合并音视频流为: {output_mp4}")
-            try:
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', video_path, '-i', audio_path,
-                    '-c:v', 'copy', '-c:a', 'copy', '-f', 'mp4', output_mp4
-                ], check=True)
-                print(f"[DASH] 合并完成: {output_mp4}")
-                os.remove(video_path)
-                os.remove(audio_path)
-            except Exception as e:
-                print("[DASH] 合并失败，请手动合并。错误：", e)
+                if not audio_url:
+                    audio_url = unescape_url(dash['audio'][0]['baseUrl'])
+                    audio_desc = dash['audio'][0].get('id')
+            video_url = unescape_url(dash['video'][0]['baseUrl'])
+            audio_path = os.path.join(save_dir, 'audio.m4s')
+            if only_audio:
+                print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
+                await download_file(session, audio_url, audio_path, headers)
+                print(f"[DASH] 音频流已保存为: {audio_path}")
+                # 转为mp3
+                output_mp3 = os.path.join(save_dir, f"{title}.mp3")
+                print(f"[DASH] 正在转换音频流为: {output_mp3}")
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'libmp3lame', output_mp3
+                    ], check=True)
+                    print(f"[DASH] 转换完成: {output_mp3}")
+                    os.remove(audio_path)
+                except Exception as e:
+                    print("[DASH] 音频转换失败，请手动转换。错误：", e)
+            else:
+                video_path = os.path.join(save_dir, 'video.m4s')
+                print("[DASH] 正在下载视频流...")
+                await download_file(session, video_url, video_path, headers)
+                print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
+                await download_file(session, audio_url, audio_path, headers)
+                print(f"[DASH] 视频流已保存为: {video_path}")
+                print(f"[DASH] 音频流已保存为: {audio_path}")
+                # 合并音视频流
+                output_mp4 = os.path.join(save_dir, f"{title}.mp4")
+                print(f"[DASH] 正在合并音视频流为: {output_mp4}")
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-y', '-i', video_path, '-i', audio_path,
+                        '-c:v', 'copy', '-c:a', 'copy', '-f', 'mp4', output_mp4
+                    ], check=True)
+                    print(f"[DASH] 合并完成: {output_mp4}")
+                    os.remove(video_path)
+                    os.remove(audio_path)
+                except Exception as e:
+                    print("[DASH] 合并失败，请手动合并。错误：", e)
             # 杜比/无损音频单独下载
             if 'dolby' in dash and dash['dolby'] and dash['dolby'].get('audio'):
                 dolby_url = unescape_url(dash['dolby']['audio'][0]['baseUrl'])
@@ -216,29 +217,29 @@ async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=
                 print("[DASH] 正在下载无损音频流...")
                 await download_file(session, flac_url, flac_path, headers)
                 print(f"[DASH] 无损音频流已保存为: {flac_path}")
-    elif 'durl' in data:
-        durl = data['durl']
-        print("提示：该视频不支持DASH流，已自动切换为MP4分段下载。")
-        print("[FLV/MP4] 正在下载视频流...")
-        seg_paths = []
-        for i, item in enumerate(durl):
-            seg_url = unescape_url(item['url'])
-            seg_path = os.path.join(save_dir, f'segment{i+1}.flv')
-            print(f"下载分段{i+1}...")
-            await download_file(session, seg_url, seg_path, headers)
-            print(f"分段{i+1}已保存为: {seg_path}")
-            seg_paths.append(seg_path)
-        output_mp4 = os.path.join(save_dir, f'{title}.mp4')
-        print(f"[FLV/MP4] 正在合并分段为: {output_mp4}")
-        try:
-            concat_list = '|'.join(seg_paths)
-            subprocess.run([
-                'ffmpeg', '-y', '-i', f'concat:{concat_list}', '-c', 'copy', output_mp4
-            ], check=True)
-            print(f"[FLV/MP4] 合并完成: {output_mp4}")
-            for seg_path in seg_paths:
-                os.remove(seg_path)
-        except Exception as e:
-            print("[FLV/MP4] 合并失败，请手动合并。错误：", e)
-    else:
-        print("未获取到视频流信息")
+        elif 'durl' in data:
+            durl = data['durl']
+            print("提示：该视频不支持DASH流，已自动切换为MP4分段下载。")
+            print("[FLV/MP4] 正在下载视频流...")
+            seg_paths = []
+            for i, item in enumerate(durl):
+                seg_url = unescape_url(item['url'])
+                seg_path = os.path.join(save_dir, f'segment{i+1}.flv')
+                print(f"下载分段{i+1}...")
+                await download_file(session, seg_url, seg_path, headers)
+                print(f"分段{i+1}已保存为: {seg_path}")
+                seg_paths.append(seg_path)
+            output_mp4 = os.path.join(save_dir, f'{title}.mp4')
+            print(f"[FLV/MP4] 正在合并分段为: {output_mp4}")
+            try:
+                concat_list = '|'.join(seg_paths)
+                subprocess.run([
+                    'ffmpeg', '-y', '-i', f'concat:{concat_list}', '-c', 'copy', output_mp4
+                ], check=True)
+                print(f"[FLV/MP4] 合并完成: {output_mp4}")
+                for seg_path in seg_paths:
+                    os.remove(seg_path)
+            except Exception as e:
+                print("[FLV/MP4] 合并失败，请手动合并。错误：", e)
+        else:
+            print("未获取到视频流信息")
