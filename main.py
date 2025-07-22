@@ -1390,7 +1390,8 @@ class SoVitsSvcPlugin(Star):
                 "f0_predictor": self.converter.default_f0_predictor,
                 "enhancer_adaptive_key": self.converter.default_enhancer_adaptive_key,
                 "cr_threshold": self.converter.default_cr_threshold,
-                "enable_mixing": self.converter.enable_mixing  # 添加混音标志
+                "enable_mixing": self.converter.enable_mixing,
+                "only_chorus": only_chorus,  # 新增，确保副歌和非副歌缓存分离
             }
 
             # 获取缓存
