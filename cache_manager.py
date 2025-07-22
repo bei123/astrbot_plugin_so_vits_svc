@@ -236,26 +236,34 @@ class CacheManager:
         except Exception as e:
             logger.error(f"清空缓存失败: {str(e)}")
 
-    def get_chorus_interval(self, input_file: str) -> Optional[dict]:
-        """获取副歌区间缓存
+    def get_chorus_interval(self, cache_key_or_file: str, is_custom_key: bool = False) -> Optional[dict]:
+        """获取副歌区间缓存，支持自定义key或文件hash
         Args:
-            input_file: 输入文件路径
+            cache_key_or_file: 自定义key（如歌曲ID+音质）或音频文件路径
+            is_custom_key: 是否为自定义key
         Returns:
-            副歌区间dict（如{"start": 123.4, "end": 234.5}），没有则返回None
+            副歌区间dict，没有则返回None
         """
-        cache_key = self._generate_cache_key(input_file, '', 0)
+        if is_custom_key:
+            cache_key = cache_key_or_file
+        else:
+            cache_key = self._generate_cache_key(cache_key_or_file, '', 0)
         index = self._load_index()
         if cache_key in index and 'chorus_interval' in index[cache_key]:
             return index[cache_key]['chorus_interval']
         return None
 
-    def save_chorus_interval(self, input_file: str, interval: dict):
-        """保存副歌区间到缓存
+    def save_chorus_interval(self, cache_key_or_file: str, interval: dict, is_custom_key: bool = False):
+        """保存副歌区间到缓存，支持自定义key或文件hash
         Args:
-            input_file: 输入文件路径
+            cache_key_or_file: 自定义key（如歌曲ID+音质）或音频文件路径
             interval: 副歌区间dict
+            is_custom_key: 是否为自定义key
         """
-        cache_key = self._generate_cache_key(input_file, '', 0)
+        if is_custom_key:
+            cache_key = cache_key_or_file
+        else:
+            cache_key = self._generate_cache_key(cache_key_or_file, '', 0)
         index = self._load_index()
         if cache_key not in index:
             index[cache_key] = {"timestamp": time.time()}
