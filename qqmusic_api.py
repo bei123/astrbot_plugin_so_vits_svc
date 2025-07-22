@@ -19,6 +19,7 @@ from astrbot.core import logger
 from .QQapi.qqmusic_api import search, song
 from .QQapi.qqmusic_api.login import get_qrcode, check_qrcode, QRLoginType, QRCodeLoginEvents
 from .QQapi.qqmusic_api.utils.credential import Credential
+from .QQapi.qqmusic_api.login import check_expired, refresh_cookies
 from quart import Quart, Response
 from aiohttp import web
 
@@ -136,6 +137,26 @@ class QQMusicAPI:
             logger.error(f"获取最新二维码文件失败: {str(e)}")
             return None
 
+    def _clear_credential(self):
+        """清除本地凭证文件和内存凭证"""
+        self.credential = None
+        if os.path.exists(self.credential_file):
+            try:
+                os.remove(self.credential_file)
+            except Exception as e:
+                logger.error(f"删除凭证文件失败: {str(e)}")
+
+    async def _is_credential_valid(self) -> bool:
+        """检测当前凭证是否有效，直接调用check_expired"""
+        if not self.credential:
+            return False
+        try:
+            expired = await check_expired(self.credential)
+            return not expired
+        except Exception as e:
+            logger.warning(f"凭证有效性检测失败: {str(e)}")
+            return False
+
     async def ensure_login(self) -> bool:
         """确保已登录QQ音乐
 
@@ -144,13 +165,46 @@ class QQMusicAPI:
         """
         async with self.credential_lock:
             if self.credential:
-                return True
+                # 检查凭证有效性
+                if await self._is_credential_valid():
+                    return True
+                else:
+                    logger.info("检测到QQ音乐凭证已过期，尝试刷新凭证...")
+                    try:
+                        refreshed = await refresh_cookies(self.credential)
+                        if refreshed:
+                            logger.info("凭证刷新成功")
+                            return True
+                        else:
+                            logger.info("凭证刷新失败，清理本地凭证，准备重新登录")
+                            self._clear_credential()
+                            self.credential = None
+                    except Exception as e:
+                        logger.info(f"凭证刷新异常: {str(e)}，清理本地凭证，准备重新登录")
+                        self._clear_credential()
+                        self.credential = None
 
             # 尝试加载已保存的凭证
             self.credential = self._load_credential()
             if self.credential:
-                logger.info("已加载保存的QQ音乐登录凭证")
-                return True
+                logger.info("已加载保存的QQ音乐登录凭证，检测有效性...")
+                if await self._is_credential_valid():
+                    return True
+                else:
+                    logger.info("检测到本地凭证已过期，尝试刷新凭证...")
+                    try:
+                        refreshed = await refresh_cookies(self.credential)
+                        if refreshed:
+                            logger.info("凭证刷新成功")
+                            return True
+                        else:
+                            logger.info("凭证刷新失败，清理本地凭证，准备重新登录")
+                            self._clear_credential()
+                            self.credential = None
+                    except Exception as e:
+                        logger.info(f"凭证刷新异常: {str(e)}，清理本地凭证，准备重新登录")
+                        self._clear_credential()
+                        self.credential = None
 
             # 需要重新登录
             logger.info("正在获取QQ音乐登录二维码...")
@@ -258,6 +312,21 @@ class QQMusicAPI:
             search_result = await search.search_by_type(keyword=keyword, num=limit)
             return search_result or []
         except Exception as e:
+            # 检查是否凭证失效
+            err_msg = str(e)
+            if any(x in err_msg for x in ["未登录", "musickey", "凭证", "登录失效", "登录过期"]):
+                logger.warning("检测到凭证失效，自动清理并重试登录")
+                self._clear_credential()
+                if await self.ensure_login():
+                    try:
+                        search_result = await search.search_by_type(keyword=keyword, num=limit)
+                        return search_result or []
+                    except Exception as e2:
+                        logger.error(f"QQ音乐搜索重试仍失败: {str(e2)}")
+                        return []
+                else:
+                    logger.error("QQ音乐重新登录失败")
+                    return []
             logger.error(f"QQ音乐搜索出错: {str(e)}")
             return []
 
@@ -312,6 +381,52 @@ class QQMusicAPI:
                 return urls.get(song_mid) if urls else None
 
         except Exception as e:
+            # 检查是否凭证失效
+            err_msg = str(e)
+            if any(x in err_msg for x in ["未登录", "musickey", "凭证", "登录失效", "登录过期"]):
+                logger.warning("检测到凭证失效，自动清理并重试登录")
+                self._clear_credential()
+                if await self.ensure_login():
+                    try:
+                        # 如果未指定音质类型，则尝试不同音质
+                        if file_type is None:
+                            file_types = [
+                                song.SongFileType.FLAC,      # 无损
+                                song.SongFileType.OGG_640,   # 640kbps
+                                song.SongFileType.OGG_320,   # 320kbps
+                                song.SongFileType.MP3_320,   # 320kbps
+                                song.SongFileType.ACC_192,   # 192kbps
+                                song.SongFileType.MP3_128,   # 128kbps
+                                song.SongFileType.ACC_96,    # 96kbps
+                                song.SongFileType.ACC_48     # 48kbps
+                            ]
+
+                            for ft in file_types:
+                                try:
+                                    urls = await song.get_song_urls(
+                                        mid=[song_mid],
+                                        credential=self.credential,
+                                        file_type=ft
+                                    )
+                                    if urls and urls.get(song_mid):
+                                        return urls[song_mid]
+                                except Exception:
+                                    continue
+
+                            return None
+                        else:
+                            urls = await song.get_song_urls(
+                                mid=[song_mid],
+                                credential=self.credential,
+                                file_type=file_type
+                            )
+                            return urls.get(song_mid) if urls else None
+                    except Exception as e2:
+                        logger.error(f"QQ音乐下载链接重试仍失败: {str(e2)}")
+                        return None
+                else:
+                    logger.error("QQ音乐重新登录失败")
+                    return None
             logger.error(f"获取QQ音乐下载链接出错: {str(e)}")
             return None
 
