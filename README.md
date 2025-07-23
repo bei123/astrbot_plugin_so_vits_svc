@@ -87,6 +87,7 @@
 显示当前服务状态，包括：服务是否正常运行、模型加载状态、队列大小、API版本、API地址、MSST配置信息、默认配置信息。
 
 ### 转换语音
+默认使用网易云音乐作为默认源
 ```shell
 /唱 0 0 起风了 -m # -m H 参数可以指定模型
 /唱 0 0 起风了 -c # -c 参数使用副歌检测，只对副歌片段进行处理
@@ -120,7 +121,6 @@
   - 网易云：`netease_<歌曲ID>_<音质>`
   - QQ音乐：`qq_<songmid>_<音质>`
   - 哔哩哔哩：`bilibili_<bvid>`
-  - 其他上传音频：使用音频内容hash
 - 副歌区间缓存文件为 `data/cache/so-vits-svc/chorus_cache.json`
 - 命中缓存时会直接使用已检测的副歌区间，无需再次请求API
 - 副歌区间检测和缓存机制对所有支持的音频来源均有效
@@ -154,11 +154,9 @@
 如果遇到问题，请检查：
 1. API服务是否正常运行（使用 `/svc_status` 检查）
 2. MSST-WebUI 服务是否正常运行
-3. BBDown 是否正确安装并配置
-4. 配置参数是否正确
-5. 上传的音频文件格式是否支持
-6. 网易云音乐 cookie 是否有效
-7. 哔哩哔哩 cookie 是否有效
+3. 配置参数是否正确
+4. 网易云音乐 cookie 是否有效
+5. 哔哩哔哩 cookie 是否有效
 
 ---
 
@@ -168,7 +166,7 @@
 
 - [MSST-WebUI API](https://github.com/bei123/MSST-WebUI/blob/api/scripts/preset_infer_api.py)
 - [So-Vits-SVC API](https://github.com/bei123/so-vits-svc/blob/api/fastapi_api_full_song.py)
-- [BBDown](https://github.com/nilaoda/BBDown)
+- [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)
 
 ---
 
@@ -179,7 +177,7 @@
 - [MSST-WebUI](https://github.com/SUC-DriverOld/MSST-WebUI) - 用于音频预处理和分离
 - [So-Vits-SVC](https://github.com/svc-develop-team/so-vits-svc) - 用于音频转换
 - [Netease_url](https://github.com/Suxiaoqinx/Netease_url) - 用于网易云音乐解析和下载
-- [BBDown](https://github.com/nilaoda/BBDown) - 用于哔哩哔哩视频下载
+- [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) - 用于哔哩哔哩音频下载，与解析
 - [QQMusicApi](https://github.com/luren-dc/QQMusicApi) - 用于QQ音乐解析和下载
 - 自动混音感谢橘子佬（代码见AutoSpark目录）
 
