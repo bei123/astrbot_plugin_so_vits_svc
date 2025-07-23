@@ -1200,7 +1200,7 @@ class SoVitsSvcPlugin(Star):
 
                     # 下载前后文件列表对比，只处理新生成的音频文件
                     before_files = set(os.listdir(self.temp_dir))
-                    await bilibili_api.bilibili_download_api(bvid, self.temp_dir, only_audio=True, cookie=cookie)
+                    await bilibili_api.download_bilibili_audio(bvid, self.temp_dir,only_audio=True,cookie=cookie)   
                     after_files = set(os.listdir(self.temp_dir))
                     new_files = after_files - before_files
 

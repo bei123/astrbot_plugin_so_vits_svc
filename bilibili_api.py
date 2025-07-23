@@ -105,6 +105,101 @@ async def fetch_bilibili_video_info(bvid, cookie=None):
         else:
             return {}
 
+async def download_bilibili_audio(bvid, save_dir, only_audio=False, cookie=None):
+    # 构造headers
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "referer": "https://www.bilibili.com",
+        "cookie": cookie or ""
+    }
+    os.makedirs(save_dir, exist_ok=True)
+    async with aiohttp.ClientSession() as session:
+        # 获取视频信息
+        info = await fetch_bilibili_video_info(bvid, cookie=cookie)
+        if not info:
+            print("获取视频信息失败")
+            return None
+        cid = info['cid']
+        title = sanitize_filename(info['title'])
+        # 获取wbi签名
+        img_key, sub_key = await getWbiKeys(session, headers)
+        params = {
+            'bvid': bvid,
+            'cid': cid,
+            'qn': '80',
+            'fnval': '16',
+            'fnver': '0',
+            'fourk': '1',
+            'otype': 'json',
+            'platform': 'web',
+        }
+        signed_params = encWbi(params, img_key, sub_key)
+        stream_url = "https://api.bilibili.com/x/player/wbi/playurl"
+        async with session.get(stream_url, params=signed_params, headers=headers) as stream_resp:
+            stream_resp.raise_for_status()
+            stream_data = await stream_resp.json()
+        dash = stream_data.get('data', {}).get('dash')
+        if not dash:
+            print("未获取到dash流信息")
+            return None
+        # 以下为原有音频下载逻辑
+        print('可用音频流：')
+        for a in dash['audio']:
+            print(f"id={a['id']} 码率={a['bandwidth']//1000}kbps 编码={a['codecs']} baseUrl={a['baseUrl']}")
+        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+            f = dash['flac']['audio']
+            print(f"无损音频流: id={f['id']} 码率={f['bandwidth']//1000}kbps 编码={f['codecs']} baseUrl={f['baseUrl']}")
+        # 优先选择flac无损音轨
+        audio_url = None
+        audio_desc = None
+        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+            f = dash['flac']['audio']
+            audio_url = unescape_url(f['baseUrl'])
+            audio_desc = f['id']
+        else:
+            audio_quality_priority = [30250, 30280, 30232, 30216]
+            for q in audio_quality_priority:
+                for audio in dash['audio']:
+                    if audio.get('id') == q:
+                        audio_url = unescape_url(audio['baseUrl'])
+                        audio_desc = q
+                        break
+                if audio_url:
+                    break
+            if not audio_url:
+                audio_url = unescape_url(dash['audio'][0]['baseUrl'])
+                audio_desc = dash['audio'][0].get('id')
+        audio_path = os.path.join(save_dir, 'audio.m4s')
+        print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
+        await download_file(session, audio_url, audio_path, headers)
+        print(f"[DASH] 音频流已保存为: {audio_path}")
+        if only_audio:
+            # 转为wav
+            output_wav = os.path.join(save_dir, f"{title}.wav")
+            print(f"[DASH] 正在转换音频流为: {output_wav}")
+            try:
+                subprocess.run([
+                    'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', output_wav
+                ], check=True)
+                print(f"[DASH] 转换完成: {output_wav}")
+                os.remove(audio_path)
+            except Exception as e:
+                print("[DASH] 音频转换失败，请手动转换。错误：", e)
+        # 杜比/无损音频单独下载
+        if 'dolby' in dash and dash['dolby'] and dash['dolby'].get('audio'):
+            dolby_url = unescape_url(dash['dolby']['audio'][0]['baseUrl'])
+            dolby_path = os.path.join(save_dir, 'dolby_audio.m4s')
+            print("[DASH] 正在下载杜比音频流...")
+            await download_file(session, dolby_url, dolby_path, headers)
+            print(f"[DASH] 杜比音频流已保存为: {dolby_path}")
+        if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
+            flac_url = unescape_url(dash['flac']['audio']['baseUrl'])
+            flac_path = os.path.join(save_dir, 'flac_audio.m4s')
+            print("[DASH] 正在下载无损音频流...")
+            await download_file(session, flac_url, flac_path, headers)
+            print(f"[DASH] 无损音频流已保存为: {flac_path}")
+        return audio_path
+
 async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=False, cookie=None):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -139,57 +234,16 @@ async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=
         data = stream_data.get('data', {})
         if 'dash' in data:
             dash = data['dash']
-            # 打印所有可用音频流信息
-            print('可用音频流：')
-            for a in dash['audio']:
-                print(f"id={a['id']} 码率={a['bandwidth']//1000}kbps 编码={a['codecs']} baseUrl={a['baseUrl']}")
-            if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
-                f = dash['flac']['audio']
-                print(f"无损音频流: id={f['id']} 码率={f['bandwidth']//1000}kbps 编码={f['codecs']} baseUrl={f['baseUrl']}")
-            # 优先选择flac无损音轨
-            audio_url = None
-            audio_desc = None
-            if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
-                f = dash['flac']['audio']
-                audio_url = unescape_url(f['baseUrl'])
-                audio_desc = f['id']
-            else:
-                audio_quality_priority = [30250, 30280, 30232, 30216]
-                for q in audio_quality_priority:
-                    for audio in dash['audio']:
-                        if audio.get('id') == q:
-                            audio_url = unescape_url(audio['baseUrl'])
-                            audio_desc = q
-                            break
-                    if audio_url:
-                        break
-                if not audio_url:
-                    audio_url = unescape_url(dash['audio'][0]['baseUrl'])
-                    audio_desc = dash['audio'][0].get('id')
             video_url = unescape_url(dash['video'][0]['baseUrl'])
-            audio_path = os.path.join(save_dir, 'audio.m4s')
             if only_audio:
-                print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
-                await download_file(session, audio_url, audio_path, headers)
-                print(f"[DASH] 音频流已保存为: {audio_path}")
-                # 转为wav
-                output_wav = os.path.join(save_dir, f"{title}.wav")
-                print(f"[DASH] 正在转换音频流为: {output_wav}")
-                try:
-                    subprocess.run([
-                        'ffmpeg', '-y', '-i', audio_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', output_wav
-                    ], check=True)
-                    print(f"[DASH] 转换完成: {output_wav}")
-                    os.remove(audio_path)
-                except Exception as e:
-                    print("[DASH] 音频转换失败，请手动转换。错误：", e)
+                await download_bilibili_audio(session, dash, save_dir, title, headers, only_audio=True)
             else:
                 video_path = os.path.join(save_dir, 'video.m4s')
                 print("[DASH] 正在下载视频流...")
                 await download_file(session, video_url, video_path, headers)
-                print(f"[DASH] 正在下载音频流（音质代码：{audio_desc}）...")
-                await download_file(session, audio_url, audio_path, headers)
+                await download_bilibili_audio(session, dash, save_dir, title, headers, only_audio=False)
                 print(f"[DASH] 视频流已保存为: {video_path}")
+                audio_path = os.path.join(save_dir, 'audio.m4s')
                 print(f"[DASH] 音频流已保存为: {audio_path}")
                 # 合并音视频流
                 output_mp4 = os.path.join(save_dir, f"{title}.mp4")
@@ -204,19 +258,6 @@ async def bilibili_download_api(bvid, save_dir, qn='80', fnval='16', only_audio=
                     os.remove(audio_path)
                 except Exception as e:
                     print("[DASH] 合并失败，请手动合并。错误：", e)
-            # 杜比/无损音频单独下载
-            if 'dolby' in dash and dash['dolby'] and dash['dolby'].get('audio'):
-                dolby_url = unescape_url(dash['dolby']['audio'][0]['baseUrl'])
-                dolby_path = os.path.join(save_dir, 'dolby_audio.m4s')
-                print("[DASH] 正在下载杜比音频流...")
-                await download_file(session, dolby_url, dolby_path, headers)
-                print(f"[DASH] 杜比音频流已保存为: {dolby_path}")
-            if 'flac' in dash and dash['flac'] and dash['flac'].get('audio'):
-                flac_url = unescape_url(dash['flac']['audio']['baseUrl'])
-                flac_path = os.path.join(save_dir, 'flac_audio.m4s')
-                print("[DASH] 正在下载无损音频流...")
-                await download_file(session, flac_url, flac_path, headers)
-                print(f"[DASH] 无损音频流已保存为: {flac_path}")
         elif 'durl' in data:
             durl = data['durl']
             print("提示：该视频不支持DASH流，已自动切换为MP4分段下载。")
