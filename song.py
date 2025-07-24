@@ -107,7 +107,7 @@ async def volc_request(method, date, query, header, ak, sk, action, body):
         return resp.json()
 
 async def get_sami_token(ak, sk, appkey):
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     body = json.dumps({
         "appkey": appkey,
         "token_version": "volc-auth-v1",
@@ -133,7 +133,7 @@ async def detect_chorus_api(audio_bytes, volc_conf):
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, data=body, headers={"Content-Type": "application/json"})
     except httpx.ReadTimeout:
-        return {"msg": "副歌检测请求超时，请稍后重试或检查网络/API状态"}
+        return {"msg": "副歌检测请求超时, 请稍后重试或检查网络/API状态"}
     if resp.status_code != 200:
         return {"msg": "副歌检测请求失败", "err": resp.text}
     result = resp.json()

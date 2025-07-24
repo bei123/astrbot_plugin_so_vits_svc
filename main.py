@@ -238,7 +238,7 @@ class MSSTProcessor:
             return None
     async def get_latest_output_filename(self, keywords: list) -> str:
         """根据关键字优先级列表查找最新的输出文件名（只根据文件名关键字，不检查本地是否存在）"""
-        import aiohttp
+
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{self.api_url}/list_outputs") as resp:
                 resp.raise_for_status()
@@ -1194,7 +1194,7 @@ class SoVitsSvcPlugin(Star):
                     song_info = {"bvid": bvid}
 
                     # 合并输出视频信息和处理提示（链式消息）
-                    
+
                     chain = [
                         Comp.At(qq=event.get_sender_id()),
                         Comp.Plain(f"正在处理哔哩哔哩视频：{song_name} (BV号: {bvid})"),
@@ -1205,14 +1205,14 @@ class SoVitsSvcPlugin(Star):
                         chain.append(Comp.Plain(f"标题：{info.get('title', '未知')}"))
                         chain.append(Comp.Plain(f"UP主：{info.get('uploader', '未知')}"))
                         # chain.append(Comp.Plain(f"分P数量：{len(info.get('parts', []))}"))
-                        if info.get('parts'):
+                        if info.get("parts"):
                             chain.append(Comp.Plain(""))
                             # chain.append(Comp.Plain("【分P列表】"))
-                            for part in info['parts']:
+                            for part in info["parts"]:
                                 chain.append(Comp.Plain(f"{part.get('index', '?')}. {part.get('title', '未知')} ({part.get('duration', '?')})"))
                             chain.append(Comp.Plain(""))
-                        if info.get('pic'):
-                            chain.append(Comp.Image.fromURL(info['pic']))
+                        if info.get("pic"):
+                            chain.append(Comp.Image.fromURL(info["pic"]))
                     yield event.chain_result(chain)
 
                     # 下载前清理临时目录，避免历史文件干扰
@@ -1224,13 +1224,13 @@ class SoVitsSvcPlugin(Star):
 
                     # 下载前后文件列表对比，只处理新生成的音频文件
                     before_files = set(os.listdir(self.temp_dir))
-                    await bilibili_api.download_bilibili_audio(bvid, self.temp_dir,only_audio=True,cookie=cookie)   
+                    await bilibili_api.download_bilibili_audio(bvid, self.temp_dir,only_audio=True,cookie=cookie)
                     after_files = set(os.listdir(self.temp_dir))
                     new_files = after_files - before_files
 
                     # 查找下载的音频文件（支持多种格式，优先无损）
                     audio_file = None
-                    audio_ext_priority = ['.flac', '.wav', '.m4a', '.mp3', '.m4s']
+                    audio_ext_priority = [".flac", ".wav", ".m4a", ".mp3", ".m4s"]
                     for ext in audio_ext_priority:
                         for f in new_files:
                             if f.endswith(ext):
@@ -1242,10 +1242,13 @@ class SoVitsSvcPlugin(Star):
                         yield event.plain_result("下载音频失败！")
                         return
                     # 如需统一格式，自动转为wav
-                    if not audio_file.endswith('.wav'):
-                        import subprocess
-                        wav_file = os.path.splitext(audio_file)[0] + '.wav'
-                        subprocess.run(['ffmpeg', '-y', '-i', audio_file, wav_file])
+                    if not audio_file.endswith(".wav"):
+                        import asyncio
+                        wav_file = os.path.splitext(audio_file)[0] + ".wav"
+                        proc = await asyncio.create_subprocess_exec(
+                            "ffmpeg", "-y", "-i", audio_file, wav_file
+                        )
+                        await proc.communicate()
                         audio_file = wav_file
 
                     # 复制音频到input_file
@@ -1354,15 +1357,15 @@ class SoVitsSvcPlugin(Star):
                     ]
                     if model_dir:
                         chain.append(Comp.Plain(f"使用模型目录：{model_dir}"))
-                    if song_info.get('pic'):
-                        chain.append(Comp.Image.fromURL(song_info['pic']))
+                    if song_info.get("pic"):
+                        chain.append(Comp.Image.fromURL(song_info["pic"]))
                     chain.append(Comp.Plain("正在下载..."))
                     # 若没有封面图，尝试用get_song_detail补全
-                    if not song_info.get('pic') and song_info.get('id'):
-                        detail = await self.converter.netease_api.get_song_detail(song_info['id'])
-                        if detail and detail.get('picUrl'):
-                            song_info['pic'] = detail['picUrl']
-                            chain.append(Comp.Image.fromURL(song_info['pic']))
+                    if not song_info.get("pic") and song_info.get("id"):
+                        detail = await self.converter.netease_api.get_song_detail(song_info["id"])
+                        if detail and detail.get("picUrl"):
+                            song_info["pic"] = detail["picUrl"]
+                            chain.append(Comp.Image.fromURL(song_info["pic"]))
                     yield event.chain_result(chain)
 
                     downloaded_file = await self.converter.netease_api.download_song(
@@ -1520,7 +1523,7 @@ class SoVitsSvcPlugin(Star):
 
                 # 检查是否获取成功
                 if not vocal_filename or not inst_filename:
-                    import aiohttp
+
                     async with aiohttp.ClientSession() as session:
                         async with session.get(f"{self.converter.msst_processor.api_url}/list_outputs") as resp:
                             resp.raise_for_status()
@@ -1920,8 +1923,8 @@ class SoVitsSvcPlugin(Star):
             result += f"/唱 [说话人ID] [音调调整] bilibili {url_or_bvid}"
 
             chain = []
-            if video_info.get('pic'):
-                chain.append(Comp.Image.fromURL(video_info['pic']))
+            if video_info.get("pic"):
+                chain.append(Comp.Image.fromURL(video_info["pic"]))
             chain.append(Comp.Plain(result))
             yield event.chain_result(chain)
 
@@ -2045,7 +2048,7 @@ def get_chorus_cache_key(source_type, song_info, input_file):
 
 def extract_bvid(text):
     """从文本或URL中提取BV号"""
-    match = re.search(r'(BV[0-9A-Za-z]+)', text)
+    match = re.search(r"(BV[0-9A-Za-z]+)", text)
     if match:
         return match.group(1)
     return text.strip()

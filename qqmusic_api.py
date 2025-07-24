@@ -338,9 +338,14 @@ class QQMusicAPI:
             return None
     async def get_song_image_url(self, mid: str, size: int = 300) -> str:
         """获取歌曲图片URL
+        Args:
+            mid: 歌曲mid
+            size: 图片尺寸(如300,500等,默认为300)
+        Returns:
+            歌曲图片URL
         """
         return song.get_song_image_url(mid, size)
-    
+
     async def search(self, keyword: str, limit: int = 5) -> List[Dict]:
         """搜索歌曲
 
