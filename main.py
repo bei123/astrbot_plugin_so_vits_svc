@@ -237,7 +237,7 @@ class MSSTProcessor:
             logger.error(f"获取模型列表失败: {str(e)}")
             return None
     async def get_latest_output_filename(self, keyword: str) -> str:
-        """根据关键字（如'vocals'、'other'、'instrumental'）获取最新的音频文件名"""
+        """根据关键字（如'vocals'、'other'、'instrumental'）获取最新的音频文件名（不区分大小写）"""
         import os
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -250,7 +250,7 @@ class MSSTProcessor:
                 file_infos = []
                 for f in files:
                     rel_path = os.path.join("temp_uploads", f["path"])
-                    if os.path.exists(rel_path) and keyword in f["name"]:
+                    if os.path.exists(rel_path) and keyword.lower() in f["name"].lower():
                         mtime = os.path.getmtime(rel_path)
                         file_infos.append((f["name"], mtime))
                 if not file_infos:
