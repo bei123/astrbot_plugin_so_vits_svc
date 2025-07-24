@@ -1521,8 +1521,9 @@ class SoVitsSvcPlugin(Star):
                             data = await resp.json()
                             all_files = [f["name"] for f in data.get("files", [])]
                             print("所有可用输出文件：", all_files)
-                    yield event.plain_result("找不到分离后的人声或伴奏文件！")
-                    return
+                            logger.error(f"所有可用输出文件：{all_files}")
+                            yield event.plain_result(f"找不到分离后的人声或伴奏文件！\n可用文件：{all_files}")
+                        return
 
                 vocal_download = await self.converter.msst_processor.download_file(
                     vocal_filename,
