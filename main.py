@@ -240,22 +240,33 @@ class MSSTProcessor:
         """根据关键字（如'vocals'、'other'、'instrumental'）获取最新的音频文件名（不区分大小写）"""
         import os
         import aiohttp
+        import logging
+        logger = logging.getLogger(__name__)
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{self.api_url}/list_outputs") as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 files = data.get("files", [])
                 if not files:
+                    logger.warning("/list_outputs 返回空文件列表")
                     return None
                 file_infos = []
                 for f in files:
                     rel_path = os.path.join("temp_uploads", f["path"])
-                    if os.path.exists(rel_path) and keyword.lower() in f["name"].lower():
-                        mtime = os.path.getmtime(rel_path)
-                        file_infos.append((f["name"], mtime))
+                    name_match = keyword.lower() in f["name"].lower()
+                    exists = os.path.exists(rel_path)
+                    logger.info(f"DEBUG: 检查文件名: {f['name']}, 路径: {rel_path}, 是否存在: {exists}, 是否命中关键字: {name_match}")
+                    if name_match:
+                        if exists:
+                            mtime = os.path.getmtime(rel_path)
+                            file_infos.append((f["name"], mtime))
+                        else:
+                            logger.warning(f"WARNING: 文件名匹配但本地文件不存在: {rel_path}")
                 if not file_infos:
+                    logger.error(f"没有找到包含关键字 '{keyword}' 且本地存在的音频文件。")
                     return None
                 file_infos.sort(key=lambda x: x[1], reverse=True)
+                logger.info(f"DEBUG: 命中关键字 '{keyword}' 的文件: {[x[0] for x in file_infos]}")
                 return file_infos[0][0]
 
 class VoiceConverter:
