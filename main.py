@@ -236,6 +236,27 @@ class MSSTProcessor:
         except Exception as e:
             logger.error(f"获取模型列表失败: {str(e)}")
             return None
+    async def get_latest_output_filename(self, keyword: str) -> str:
+        """根据关键字（如'vocals'、'other'、'instrumental'）获取最新的音频文件名"""
+        import os
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.api_url}/list_outputs") as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                files = data.get("files", [])
+                if not files:
+                    return None
+                file_infos = []
+                for f in files:
+                    rel_path = os.path.join("temp_uploads", f["path"])
+                    if os.path.exists(rel_path) and keyword in f["name"]:
+                        mtime = os.path.getmtime(rel_path)
+                        file_infos.append((f["name"], mtime))
+                if not file_infos:
+                    return None
+                file_infos.sort(key=lambda x: x[1], reverse=True)
+                return file_infos[0][0]
 
 class VoiceConverter:
     """语音转换器"""
@@ -1486,12 +1507,16 @@ class SoVitsSvcPlugin(Star):
 
             # 下载分离后的文件
             try:
+                vocal_filename = await self.converter.msst_processor.get_latest_output_filename("vocals")
+                inst_filename = await self.converter.msst_processor.get_latest_output_filename("other")
+                if not inst_filename:
+                    inst_filename = await self.converter.msst_processor.get_latest_output_filename("instrumental")
                 vocal_download = await self.converter.msst_processor.download_file(
-                    "input_vocals_noreverb.wav",
+                    vocal_filename,
                     vocal_file
                 )
                 inst_download = await self.converter.msst_processor.download_file(
-                    "input_instrumental.wav",
+                    inst_filename,
                     inst_file
                 )
 
