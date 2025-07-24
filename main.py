@@ -237,8 +237,7 @@ class MSSTProcessor:
             logger.error(f"获取模型列表失败: {str(e)}")
             return None
     async def get_latest_output_filename(self, keywords: list) -> str:
-        """根据关键字优先级列表查找最新的输出文件名"""
-        import os
+        """根据关键字优先级列表查找最新的输出文件名（只根据文件名关键字，不检查本地是否存在）"""
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{self.api_url}/list_outputs") as resp:
@@ -251,17 +250,15 @@ class MSSTProcessor:
                 for keyword in keywords:
                     file_infos = []
                     for f in files:
-                        rel_path = os.path.join("temp_uploads", f["path"])
                         name_match = keyword.lower() in f["name"].lower()
-                        exists = os.path.exists(rel_path)
-                        if name_match and exists:
-                            mtime = os.path.getmtime(rel_path)
+                        if name_match:
+                            mtime = f.get("mtime", 0)  # 如果有mtime字段，否则为0
                             file_infos.append((f["name"], mtime))
                     if file_infos:
                         file_infos.sort(key=lambda x: x[1], reverse=True)
                         print(f"DEBUG: 命中关键字 '{keyword}' 的文件: {[x[0] for x in file_infos]}")
                         return file_infos[0][0]
-                print(f"没有找到包含关键字 {keywords} 且本地存在的音频文件。")
+                print(f"没有找到包含关键字 {keywords} 的音频文件。")
                 return None
 
 class VoiceConverter:
