@@ -1511,6 +1511,19 @@ class SoVitsSvcPlugin(Star):
                 inst_filename = await self.converter.msst_processor.get_latest_output_filename("other")
                 if not inst_filename:
                     inst_filename = await self.converter.msst_processor.get_latest_output_filename("instrumental")
+
+                # 检查是否获取成功
+                if not vocal_filename or not inst_filename:
+                    import aiohttp
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(f"{self.converter.msst_processor.api_url}/list_outputs") as resp:
+                            resp.raise_for_status()
+                            data = await resp.json()
+                            all_files = [f["name"] for f in data.get("files", [])]
+                            print("所有可用输出文件：", all_files)
+                    yield event.plain_result("找不到分离后的人声或伴奏文件！")
+                    return
+
                 vocal_download = await self.converter.msst_processor.download_file(
                     vocal_filename,
                     vocal_file
