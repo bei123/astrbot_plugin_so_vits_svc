@@ -238,8 +238,7 @@ class MSSTProcessor:
             return None
     async def get_latest_output_filename(self, keyword: str) -> str:
         """根据关键字（如'vocals'、'other'、'instrumental'）获取最新的音频文件名（不区分大小写）"""
-        import os
-        import aiohttp
+    
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{self.api_url}/list_outputs") as resp:
                 resp.raise_for_status()
