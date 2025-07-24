@@ -236,8 +236,8 @@ class MSSTProcessor:
         except Exception as e:
             logger.error(f"获取模型列表失败: {str(e)}")
             return None
-    async def get_latest_output_filename(self, keyword: str) -> str:
-        print(f"DEBUG: 进入 get_latest_output_filename, keyword={keyword}")
+    async def get_latest_output_filename(self, keywords: list) -> str:
+        """根据关键字优先级列表查找最新的输出文件名"""
         import os
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -248,24 +248,21 @@ class MSSTProcessor:
                 if not files:
                     print("/list_outputs 返回空文件列表")
                     return None
-                file_infos = []
-                for f in files:
-                    rel_path = os.path.join("temp_uploads", f["path"])
-                    name_match = keyword.lower() in f["name"].lower()
-                    exists = os.path.exists(rel_path)
-                    print(f"DEBUG: 检查文件名: {f['name']}, 路径: {rel_path}, 是否存在: {exists}, 是否命中关键字: {name_match}")
-                    if name_match:
-                        if exists:
+                for keyword in keywords:
+                    file_infos = []
+                    for f in files:
+                        rel_path = os.path.join("temp_uploads", f["path"])
+                        name_match = keyword.lower() in f["name"].lower()
+                        exists = os.path.exists(rel_path)
+                        if name_match and exists:
                             mtime = os.path.getmtime(rel_path)
                             file_infos.append((f["name"], mtime))
-                        else:
-                            print(f"WARNING: 文件名匹配但本地文件不存在: {rel_path}")
-                if not file_infos:
-                    print(f"没有找到包含关键字 '{keyword}' 且本地存在的音频文件。")
-                    return None
-                file_infos.sort(key=lambda x: x[1], reverse=True)
-                print(f"DEBUG: 命中关键字 '{keyword}' 的文件: {[x[0] for x in file_infos]}")
-                return file_infos[0][0]
+                    if file_infos:
+                        file_infos.sort(key=lambda x: x[1], reverse=True)
+                        print(f"DEBUG: 命中关键字 '{keyword}' 的文件: {[x[0] for x in file_infos]}")
+                        return file_infos[0][0]
+                print(f"没有找到包含关键字 {keywords} 且本地存在的音频文件。")
+                return None
 
 class VoiceConverter:
     """语音转换器"""
@@ -1517,9 +1514,9 @@ class SoVitsSvcPlugin(Star):
             # 下载分离后的文件
             try:
                 print("DEBUG: 即将查找人声文件名")
-                vocal_filename = await self.converter.msst_processor.get_latest_output_filename("vocals")
+                vocal_filename = await self.converter.msst_processor.get_latest_output_filename(["vocals_dry", "vocals"])
                 print("DEBUG: 即将查找伴奏文件名")
-                inst_filename = await self.converter.msst_processor.get_latest_output_filename("other")
+                inst_filename = await self.converter.msst_processor.get_latest_output_filename(["other", "instrumental"])
                 if not inst_filename:
                     print("DEBUG: 没找到other，查找instrumental")
                     inst_filename = await self.converter.msst_processor.get_latest_output_filename("instrumental")
