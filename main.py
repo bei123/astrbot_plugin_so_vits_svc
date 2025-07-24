@@ -1243,7 +1243,6 @@ class SoVitsSvcPlugin(Star):
                         return
                     # 如需统一格式，自动转为wav
                     if not audio_file.endswith(".wav"):
-                        import asyncio
                         wav_file = os.path.splitext(audio_file)[0] + ".wav"
                         proc = await asyncio.create_subprocess_exec(
                             "ffmpeg", "-y", "-i", audio_file, wav_file
