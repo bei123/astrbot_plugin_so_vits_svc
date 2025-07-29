@@ -1103,9 +1103,23 @@ class SoVitsSvcPlugin(Star):
             model_dir = None  # 默认使用配置中的模型目录
 
             only_chorus = False
+            quick_cut = False
+            quick_duration = 60  # 默认1分钟
+            
             if "-c" in args:
                 only_chorus = True
                 args.remove("-c")
+                
+            if "-q" in args:
+                quick_cut = True
+                args.remove("-q")
+                # 检查是否有指定时长参数
+                if len(args) >= 3 and args[2].isdigit():
+                    quick_duration = int(args[2])
+                    args.pop(2)  # 移除时长参数
+                elif len(args) >= 4 and args[3].isdigit():
+                    quick_duration = int(args[3])
+                    args.pop(3)  # 移除时长参数
 
             # 参数解析阶段，只设置变量，不做下载和处理
             if len(args) >= 2:
@@ -1396,7 +1410,9 @@ class SoVitsSvcPlugin(Star):
                         "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
                         "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
                         "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] -m [模型目录] - 搜索QQ音乐（可选指定模型目录）\n"
-                        "5. /convert_voice [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）"
+                        "5. /convert_voice [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）\n"
+                        "6. /convert_voice [说话人ID] [音调调整] [歌曲名] -q [时长] - 快速截取（跳过前30秒，保留指定时长，默认60秒）\n"
+                        "7. /convert_voice [说话人ID] [音调调整] [歌曲名] -c - 只转换副歌部分"
                     )
                     return
 
@@ -1433,6 +1449,8 @@ class SoVitsSvcPlugin(Star):
                 "cr_threshold": self.converter.default_cr_threshold,
                 "enable_mixing": self.converter.enable_mixing,
                 "only_chorus": only_chorus,  # 新增，确保副歌和非副歌缓存分离
+                "quick_cut": quick_cut,  # 新增，确保快速截取缓存分离
+                "quick_duration": quick_duration,  # 新增，确保不同时长缓存分离
             }
 
             # 获取缓存
@@ -1449,7 +1467,7 @@ class SoVitsSvcPlugin(Star):
                 yield event.chain_result(chain)
                 return
 
-            # 音频文件准备好后，推理前裁切副歌
+            # 音频文件准备好后，推理前裁切副歌或快速截取
             if only_chorus:
                 try:
                     # 副歌检测前，先查缓存
@@ -1495,6 +1513,36 @@ class SoVitsSvcPlugin(Star):
                             return
                 except Exception as e:
                     yield event.plain_result(f"副歌检测或裁切出错：{str(e)}\n{traceback.format_exc()}")
+                    return
+            elif quick_cut:
+                try:
+                    # 快速截取：跳过前30秒，保留指定时长
+                    audio = AudioSegment.from_file(input_file)
+                    total_duration = len(audio) / 1000  # 转换为秒
+                    
+                    # 计算截取区间
+                    start_time = 30  # 跳过前30秒
+                    end_time = min(start_time + quick_duration, total_duration)
+                    
+                    # 如果音频总长度不足，调整起始时间
+                    if total_duration < start_time + quick_duration:
+                        start_time = max(0, total_duration - quick_duration)
+                        end_time = total_duration
+                    
+                    # 转换为毫秒
+                    start_ms = int(start_time * 1000)
+                    end_ms = int(end_time * 1000)
+                    
+                    # 截取音频
+                    cut_audio = audio[start_ms:end_ms]
+                    cut_path = input_file.replace(".wav", "_quick_cut.wav")
+                    cut_audio.export(cut_path, format="wav")
+                    input_file = cut_path
+                    
+                    logger.info(f"快速截取完成：跳过前30秒，截取{start_time}-{end_time}秒，总时长{end_time-start_time}秒")
+                    
+                except Exception as e:
+                    yield event.plain_result(f"快速截取出错：{str(e)}\n{traceback.format_exc()}")
                     return
 
             # 开始处理流程
