@@ -3,7 +3,7 @@
 import re
 from typing import Any
 
-from qqmusic_api.utils.network import api_request
+from .utils.network import api_request
 
 from .utils.common import qrc_decrypt
 
