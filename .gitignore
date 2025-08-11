@@ -31,3 +31,14 @@ packages/python_interpreter/workplace
 .idea
 pytest.ini
 .astrbot
+*.pyc
+__pycache__
+.pytest_cache/
+.vscode/
+.venv/
+.conda/
+.idea/
+.astrbot/
+.coverage/
+.coverage.xml
+.coverage.xml.gz
