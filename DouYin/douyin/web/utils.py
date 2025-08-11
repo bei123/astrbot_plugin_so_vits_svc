@@ -80,10 +80,17 @@ class TokenManager:
     token_conf = douyin_manager.get("msToken", None)
     ttwid_conf = douyin_manager.get("ttwid", None)
     proxies_conf = douyin_manager.get("proxies", None)
-    proxies = {
-        "http": proxies_conf.get("http", None),
-        "https": proxies_conf.get("https", None),
-    }
+    # 修复代理配置格式，适配新版本httpx
+    if proxies_conf and isinstance(proxies_conf, dict):
+        # 优先使用https代理，如果没有则使用http代理
+        if proxies_conf.get("https"):
+            proxies = proxies_conf.get("https")
+        elif proxies_conf.get("http"):
+            proxies = proxies_conf.get("http")
+        else:
+            proxies = None
+    else:
+        proxies = None
 
     @classmethod
     def gen_real_msToken(cls) -> str:
@@ -371,8 +378,9 @@ class SecUserIdFetcher:
                     )
 
         except httpx.RequestError as exc:
+            proxy_info = TokenManager.proxies if TokenManager.proxies else "无代理"
             raise APIConnectionError("请求端点失败，请检查当前网络环境。 链接：{0}，代理：{1}，异常类名：{2}，异常详细信息：{3}"
-                                     .format(url, TokenManager.proxies, cls.__name__, exc)
+                                     .format(url, proxy_info, cls.__name__, exc)
                                      )
 
     @classmethod
@@ -450,8 +458,9 @@ class AwemeIdFetcher:
                 raise APIResponseError("未在响应的地址中找到 aweme_id，检查链接是否为作品页")
 
             except httpx.RequestError as exc:
+                proxy_info = TokenManager.proxies if TokenManager.proxies else "无代理"
                 raise APIConnectionError(
-                    f"请求端点失败，请检查当前网络环境。链接：{url}，代理：{TokenManager.proxies}，异常类名：{cls.__name__}，异常详细信息：{exc}"
+                    f"请求端点失败，请检查当前网络环境。链接：{url}，代理：{proxy_info}，异常类名：{cls.__name__}，异常详细信息：{exc}"
                 )
 
             except httpx.HTTPStatusError as e:
@@ -556,8 +565,9 @@ class WebCastIdFetcher:
 
         except httpx.RequestError as exc:
             # 捕获所有与 httpx 请求相关的异常情况 (Captures all httpx request-related exceptions)
+            proxy_info = TokenManager.proxies if TokenManager.proxies else "无代理"
             raise APIConnectionError("请求端点失败，请检查当前网络环境。 链接：{0}，代理：{1}，异常类名：{2}，异常详细信息：{3}"
-                                     .format(url, TokenManager.proxies, cls.__name__, exc)
+                                     .format(url, proxy_info, cls.__name__, exc)
                                      )
 
         except httpx.HTTPStatusError as e:
