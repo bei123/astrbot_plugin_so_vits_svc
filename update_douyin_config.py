@@ -13,46 +13,51 @@ from pathlib import Path
 from typing import Optional
 
 
-def load_conf_schema() -> Optional[dict]:
+def load_actual_config() -> Optional[dict]:
     """
-    加载_conf_schema.json配置文件
+    加载实际的配置文件
     
     Returns:
         配置字典，如果加载失败返回None
     """
     try:
-        schema_path = Path(__file__).parent / "_conf_schema.json"
-        with open(schema_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        # 尝试从data/config目录加载配置文件
+        config_path = Path(__file__).parent.parent.parent / "config" / "so-vits-svc-api_config.json"
+        if not config_path.exists():
+            # 如果不存在，尝试从插件目录加载
+            config_path = Path(__file__).parent / "config.json"
+        
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            print(f"配置文件不存在: {config_path}")
+            return None
     except Exception as e:
-        print(f"加载_conf_schema.json失败: {e}")
+        print(f"加载配置文件失败: {e}")
         return None
 
 
-def get_douyin_cookie_from_schema(schema: dict) -> Optional[str]:
+def get_douyin_cookie_from_config(config: dict) -> Optional[str]:
     """
-    从配置schema中提取抖音cookie
+    从实际配置中提取抖音cookie
     
     Args:
-        schema: 配置schema字典
+        config: 实际配置字典
         
     Returns:
         抖音cookie字符串，如果没有找到返回None
     """
     try:
         # 从base_setting中获取douyin_cookie
-        base_setting = schema.get("base_setting", {})
-        items = base_setting.get("items", {})
-        douyin_cookie_config = items.get("douyin_cookie", {})
-        
-        # 获取默认值或当前值
-        douyin_cookie = douyin_cookie_config.get("default", "")
+        base_setting = config.get("base_setting", {})
+        douyin_cookie = base_setting.get("douyin_cookie", "")
         
         if douyin_cookie:
-            print(f"从_conf_schema.json中读取到抖音cookie: {douyin_cookie[:50]}...")
+            print(f"从配置文件中读取到抖音cookie: {douyin_cookie[:50]}...")
             return douyin_cookie
         else:
-            print("在_conf_schema.json中没有找到抖音cookie配置")
+            print("在配置文件中没有找到抖音cookie配置")
             return None
             
     except Exception as e:
@@ -143,14 +148,14 @@ def main():
     """
     print("开始更新抖音配置...")
     
-    # 1. 加载_conf_schema.json
-    schema = load_conf_schema()
-    if not schema:
-        print("无法加载_conf_schema.json，退出")
+    # 1. 加载实际配置文件
+    config = load_actual_config()
+    if not config:
+        print("无法加载配置文件，退出")
         return False
     
     # 2. 提取抖音cookie
-    douyin_cookie = get_douyin_cookie_from_schema(schema)
+    douyin_cookie = get_douyin_cookie_from_config(config)
     if not douyin_cookie:
         print("没有找到抖音cookie，退出")
         return False

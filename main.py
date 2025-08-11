@@ -1078,17 +1078,38 @@ class SoVitsSvcPlugin(Star):
         }
 
     def _update_douyin_config(self) -> None:
-        """更新抖音配置 - 从_conf_schema.json读取cookie并更新到config.yaml"""
+        """更新抖音配置 - 从实际配置中读取cookie并更新到config.yaml"""
         try:
-            # 导入配置更新模块
-            from .update_douyin_config import main as update_config
+            # 从实际配置中获取抖音cookie
+            base_setting = self.config.get("base_setting", {})
+            douyin_cookie = base_setting.get("douyin_cookie", "")
+            
+            if not douyin_cookie:
+                logger.warning("在配置中没有找到抖音cookie，跳过配置更新")
+                return
+            
             logger.info("开始更新抖音配置...")
             
-            # 执行配置更新
-            if update_config():
-                logger.info("抖音配置更新成功")
-            else:
-                logger.warning("抖音配置更新失败或没有找到cookie配置")
+            # 导入配置更新模块
+            from .update_douyin_config import load_config_yaml, update_config_yaml, save_config_yaml
+            
+            # 加载config.yaml
+            config = load_config_yaml()
+            if not config:
+                logger.error("无法加载config.yaml")
+                return
+            
+            # 更新配置
+            if not update_config_yaml(config, douyin_cookie):
+                logger.error("更新config.yaml失败")
+                return
+            
+            # 保存配置
+            if not save_config_yaml(config):
+                logger.error("保存config.yaml失败")
+                return
+            
+            logger.info("抖音配置更新成功")
                 
         except Exception as e:
             logger.error(f"更新抖音配置时出错: {str(e)}")

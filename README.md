@@ -38,8 +38,9 @@
   - 默认值: 空
 - **`bbdown_cookie`**: 哔哩哔哩Cookie
   - 默认值: 空
-- ** 'douyin_cookie' **: 抖音Cookie
+- **`douyin_cookie`**: 抖音Cookie
   - 默认值: 空
+  - 说明: 用于访问抖音API的Cookie，提高下载成功率。请从浏览器开发者工具中复制抖音网站的Cookie
 
 
 ### 语音转换设置
