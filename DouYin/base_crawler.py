@@ -67,11 +67,17 @@ class BaseCrawler:
             max_tasks: int = 50,
             crawler_headers: dict = {},
     ):
+        # 处理代理设置 - 适配新版本httpx
         if isinstance(proxies, dict):
-            self.proxies = proxies
-            # [f"{k}://{v}" for k, v in proxies.items()]
+            # 新版本httpx使用proxy参数，格式为字符串
+            if 'http' in proxies and proxies['http']:
+                self.proxy = proxies['http']
+            elif 'https' in proxies and proxies['https']:
+                self.proxy = proxies['https']
+            else:
+                self.proxy = None
         else:
-            self.proxies = None
+            self.proxy = None
 
         # 爬虫请求头 / Crawler request header
         self.crawler_headers = crawler_headers or {}
@@ -95,7 +101,7 @@ class BaseCrawler:
         # 异步客户端 / Asynchronous client
         self.aclient = httpx.AsyncClient(
             headers=self.crawler_headers,
-            proxies=self.proxies,
+            proxy=self.proxy,
             timeout=self.timeout,
             limits=self.limits,
             transport=self.atransport,

@@ -178,28 +178,32 @@ class DouyinAudioDownloader:
                         detail = response['aweme_detail']
                         return self._parse_video_detail(detail, aweme_id)
                     elif response and 'status_code' in response and response['status_code'] != 0:
-                        logger.warning(f"API返回错误: {response.get('status_msg', '未知错误')}")
-                        return await self._fetch_video_info_fallback(aweme_id)
+                        error_msg = f"API返回错误: {response.get('status_msg', '未知错误')}"
+                        logger.error(error_msg)
+                        raise Exception(error_msg)
                     elif response:
                         # 如果响应存在但没有aweme_detail，尝试其他字段
-                        logger.warning(f"API响应格式异常: {list(response.keys()) if isinstance(response, dict) else type(response)}")
-                        return await self._fetch_video_info_fallback(aweme_id)
+                        error_msg = f"API响应格式异常: {list(response.keys()) if isinstance(response, dict) else type(response)}"
+                        logger.error(error_msg)
+                        raise Exception(error_msg)
                     else:
-                        logger.warning("API返回空响应")
-                        return await self._fetch_video_info_fallback(aweme_id)
+                        error_msg = "API返回空响应"
+                        logger.error(error_msg)
+                        raise Exception(error_msg)
                 else:
-                    logger.warning("爬虫模块不可用，使用备用方案")
-                    return await self._fetch_video_info_fallback(aweme_id)
+                    error_msg = "爬虫模块不可用"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
                     
             except Exception as e:
                 logger.warning(f"获取视频信息失败 (尝试 {attempt + 1}/{self.max_retries}): {e}")
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(1 * (attempt + 1))  # 指数退避
                 else:
-                    logger.error(f"所有尝试都失败了，使用备用方案: {e}")
-                    return await self._fetch_video_info_fallback(aweme_id)
+                    logger.error(f"所有尝试都失败了: {e}")
+                    raise Exception(f"获取视频信息失败: {e}")
         
-        return await self._fetch_video_info_fallback(aweme_id)
+        raise Exception("获取视频信息失败，已达到最大重试次数")
     
     def _parse_video_detail(self, detail: Dict[str, Any], aweme_id: str) -> Dict[str, Any]:
         """解析视频详情数据"""
@@ -281,48 +285,7 @@ class DouyinAudioDownloader:
                 'error': str(e)
             }
     
-    async def _fetch_video_info_fallback(self, aweme_id: str) -> Dict[str, Any]:
-        """备用方案：使用基础HTTP请求获取视频信息"""
-        try:
-            # 这里可以实现基础的HTTP请求逻辑
-            # 由于抖音API需要特殊的签名和参数，这里提供一个基础框架
-            url = f"https://www.douyin.com/video/{aweme_id}"
-            
-            if self.session:
-                async with self.session.get(url) as response:
-                    if response.status == 200:
-                        html = await response.text()
-                        # 这里可以添加HTML解析逻辑来提取视频信息
-                        # 由于抖音的反爬机制，这种方法可能不够稳定
-                        logger.info(f"备用方案：成功获取HTML页面，长度: {len(html)}")
-                        return {
-                            'aweme_id': aweme_id,
-                            'title': f'Video_{aweme_id}',
-                            'author': 'Unknown',
-                            'duration': 0,
-                            'create_time': 0,
-                            'audio_url': None,
-                            'cover_url': None,
-                            'statistics': {},
-                            'note': '使用备用方案获取信息，可能不完整'
-                        }
-                    else:
-                        logger.warning(f"备用方案：HTTP请求失败，状态码: {response.status}")
-            
-        except Exception as e:
-            logger.error(f"备用方案获取视频信息失败: {e}")
-        
-        return {
-            'aweme_id': aweme_id,
-            'title': f'Video_{aweme_id}',
-            'author': 'Unknown',
-            'duration': 0,
-            'create_time': 0,
-            'audio_url': None,
-            'cover_url': None,
-            'statistics': {},
-            'error': '无法获取视频信息'
-        }
+
     
     async def download_audio(self, audio_url: str, filename: str) -> str:
         """

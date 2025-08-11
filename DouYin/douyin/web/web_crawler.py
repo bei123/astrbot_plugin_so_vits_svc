@@ -79,7 +79,7 @@ class DouyinWebCrawler:
                 "Referer": douyin_config["headers"]["Referer"],
                 "Cookie": douyin_config["headers"]["Cookie"],
             },
-            "proxies": {"http://": douyin_config["proxies"]["http"], "https://": douyin_config["proxies"]["https"]},
+            "proxies": {"http": douyin_config["proxies"]["http"], "https": douyin_config["proxies"]["https"]},
         }
         return kwargs
 
