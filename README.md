@@ -38,6 +38,9 @@
   - 默认值: 空
 - **`bbdown_cookie`**: 哔哩哔哩Cookie
   - 默认值: 空
+- ** 'douyin_cookie' **: 抖音Cookie
+  - 默认值: 空
+
 
 ### 语音转换设置
 - **`enable_mixing`**: 是否开启混音（默认 true）
@@ -78,6 +81,7 @@
 - `/cancel_convert`：取消转换任务
 - `/bilibili_info`：获取哔哩哔哩视频信息
 - `/clear_cache`：清空所有缓存
+- `/douyin_info`：获取抖音视频信息
 - `/唱`：转换语音（所有用户均可用）
 
 ### 检查服务状态
@@ -95,6 +99,7 @@
 /唱 0 0 bilibili BV1xx411c7mD  # 通过BV号转换哔哩哔哩视频
 /唱 0 0 bilibili https://www.bilibili.com/video/BV1xx411c7mD  # 提供链接转换哔哩哔哩视频
 /唱 0 0 qq 起风了  # 搜索并转换QQ音乐中的"起风了"
+/唱 0 0 douyin https://v.douyin.com/yWuwc--_--c/  # 转换抖音视频
 ```
 
 > **注意：**
@@ -103,6 +108,7 @@
 > - 使用网易云音乐下载时，需要正确配置 `netease_cookie`
 > - 使用哔哩哔哩下载时，需要正确配置 `bbdown_path` 和 `bbdown_cookie`
 > - 使用QQ音乐下载时，需要正确配置 `qqmusic_credential`
+> - 使用抖音下载时，需要正确配置 `douyin_cookie`
 
 ---
 
@@ -121,6 +127,7 @@
   - 网易云：`netease_<歌曲ID>_<音质>`
   - QQ音乐：`qq_<songmid>_<音质>`
   - 哔哩哔哩：`bilibili_<bvid>`
+  - 抖音：`douyin_<aweme_id>`
 - 副歌区间缓存文件为 `data/cache/so-vits-svc/chorus_cache.json`
 - 命中缓存时会直接使用已检测的副歌区间，无需再次请求API
 - 副歌区间检测和缓存机制对所有支持的音频来源均有效
@@ -179,6 +186,7 @@
 - [Netease_url](https://github.com/Suxiaoqinx/Netease_url) - 用于网易云音乐解析和下载
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) - 用于哔哩哔哩音频下载，与解析
 - [QQMusicApi](https://github.com/luren-dc/QQMusicApi) - 用于QQ音乐解析和下载
+- [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API) - 用于抖音音频下载，与解析
 - 自动混音感谢橘子佬（代码见AutoSpark目录）
 
 感谢这些优秀的开源项目。
