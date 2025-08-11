@@ -23,6 +23,7 @@ from .netease_api import NeteaseMusicAPI
 from . import bilibili_api
 from .qqmusic_api import QQMusicAPI
 from .cache_manager import CacheManager
+from .douyin_audio_downloader import DouyinAudioAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from astrbot.api.event import filter
@@ -891,8 +892,8 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
 @register(
     name="so-vits-svc-api",
     author="Soulter",
-    desc="So-Vits-SVC API 语音转换插件",
-    version="1.3.4",
+    desc="So-Vits-SVC API 语音转换插件 - 支持抖音、B站、QQ音乐、网易云音乐",
+    version="1.3.5",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -909,8 +910,12 @@ class SoVitsSvcPlugin(Star):
         self.converter = VoiceConverter(self.config)  # 立即初始化 converter
         self.conversion_tasks = {}  # 存储正在进行的转换任务
         self.msst_processor = None  # 延迟初始化 MSST 处理器
+        self.douyin_api = None  # 延迟初始化抖音下载器
         self.temp_dir = "data/temp/so-vits-svc"
         os.makedirs(self.temp_dir, exist_ok=True)
+        
+        # 初始化时更新抖音配置
+        self._update_douyin_config()
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -966,6 +971,24 @@ class SoVitsSvcPlugin(Star):
                                 "type": "string",
                                 "hint": "用于访问网易云音乐API的Cookie",
                                 "default": "",
+                            },
+                            "douyin_download_dir": {
+                                "description": "抖音音频下载目录",
+                                "type": "string",
+                                "hint": "抖音音频文件的下载保存目录",
+                                "default": "data/downloads/douyin",
+                            },
+                            "douyin_timeout": {
+                                "description": "抖音下载超时时间(秒)",
+                                "type": "integer",
+                                "hint": "抖音音频下载的超时时间",
+                                "default": 60,
+                            },
+                            "douyin_max_retries": {
+                                "description": "抖音下载最大重试次数",
+                                "type": "integer",
+                                "hint": "抖音音频下载失败时的最大重试次数",
+                                "default": 3,
                             },
                         },
                     },
@@ -1054,10 +1077,35 @@ class SoVitsSvcPlugin(Star):
             }
         }
 
+    def _update_douyin_config(self) -> None:
+        """更新抖音配置 - 从_conf_schema.json读取cookie并更新到config.yaml"""
+        try:
+            # 导入配置更新模块
+            from .update_douyin_config import main as update_config
+            logger.info("开始更新抖音配置...")
+            
+            # 执行配置更新
+            if update_config():
+                logger.info("抖音配置更新成功")
+            else:
+                logger.warning("抖音配置更新失败或没有找到cookie配置")
+                
+        except Exception as e:
+            logger.error(f"更新抖音配置时出错: {str(e)}")
+
     async def _init_config(self) -> None:
         """初始化配置"""
         # 初始化 MSST 处理器
         self.msst_processor = MSSTProcessor(self.config.get("base_setting", {}).get("msst_url", "http://localhost:9000"))
+        
+        # 初始化抖音下载器
+        base_setting = self.config.get("base_setting", {})
+        douyin_config = {
+            "output_dir": base_setting.get("douyin_download_dir", "data/downloads/douyin"),
+            "timeout": base_setting.get("douyin_timeout", 60),
+            "max_retries": base_setting.get("douyin_max_retries", 3)
+        }
+        self.douyin_api = DouyinAudioAPI(**douyin_config)
         await self.msst_processor.initialize()
 
     @command("helloworld")
@@ -1167,6 +1215,23 @@ class SoVitsSvcPlugin(Star):
                                 song_name = " ".join(args[3:model_index])
                             else:
                                 # 如果没有找到-m参数，整个剩余部分都是歌曲名
+                                song_name = " ".join(args[3:])
+                    elif args[2].lower() == "douyin":
+                        source_type = "douyin"
+                        if len(args) > 3:
+                            # 检查是否指定了模型目录
+                            model_index = -1
+                            for i, arg in enumerate(args):
+                                if arg == "-m" and i + 1 < len(args):
+                                    model_index = i
+                                    break
+
+                            if model_index != -1:
+                                # 如果找到了-m参数，提取模型目录和抖音链接
+                                model_dir = args[model_index + 1]
+                                song_name = " ".join(args[3:model_index])
+                            else:
+                                # 如果没有找到-m参数，整个剩余部分都是抖音链接
                                 song_name = " ".join(args[3:])
                     else:
                         # 检查是否指定了模型目录
@@ -1332,6 +1397,90 @@ class SoVitsSvcPlugin(Star):
                 except Exception as e:
                     logger.error(f"处理QQ音乐时出错: {str(e)}")
                     yield event.plain_result(f"搜索/下载QQ音乐歌曲时出错：{str(e)}")
+                    return
+            elif source_type == "douyin" and song_name:
+                try:
+                    yield event.plain_result(f"正在处理抖音视频：{song_name}...")
+
+                    # 确保抖音下载器已初始化
+                    if not self.douyin_api:
+                        await self._init_config()
+                    
+                    # 检查初始化是否成功
+                    if not self.douyin_api:
+                        yield event.plain_result("抖音下载器初始化失败，请检查配置")
+                        return
+
+                    # 获取视频信息
+                    video_info = await self.douyin_api.get_video_info(song_name)
+                    
+                    if not video_info or not video_info.get('success', True):
+                        error_msg = video_info.get('error', '未知错误') if video_info else '获取失败'
+                        yield event.plain_result(f"获取抖音视频信息失败：{error_msg}")
+                        return
+
+                    # 显示视频信息
+                    chain = [
+                        Comp.At(qq=event.get_sender_id()),
+                        Comp.Plain(f"正在处理抖音视频：{song_name}"),
+                        Comp.Plain(""),
+                        Comp.Plain("【视频信息】"),
+                        Comp.Plain(f"标题：{video_info.get('title', '未知标题')}"),
+                        Comp.Plain(f"作者：{video_info.get('author', '未知作者')}"),
+                        Comp.Plain(f"时长：{video_info.get('duration', 0)}秒"),
+                    ]
+
+                    # 统计信息
+                    stats = video_info.get('statistics', {})
+                    if stats:
+                        chain.append(Comp.Plain(""))
+                        chain.append(Comp.Plain("【统计信息】"))
+                        chain.append(Comp.Plain(f"点赞：{stats.get('digg_count', 0)}"))
+                        chain.append(Comp.Plain(f"评论：{stats.get('comment_count', 0)}"))
+                        chain.append(Comp.Plain(f"分享：{stats.get('share_count', 0)}"))
+
+                    if video_info.get('cover_url'):
+                        chain.append(Comp.Image.fromURL(video_info['cover_url']))
+
+                    yield event.chain_result(chain)
+
+                    # 下载音频
+                    result = await self.douyin_api.download_from_url(song_name, download_cover=False)
+                    
+                    if not result.get('success'):
+                        error_msg = result.get('error', '下载失败')
+                        yield event.plain_result(f"下载抖音音频失败：{error_msg}")
+                        return
+
+                    # 检查下载的文件
+                    audio_file = result.get('file_path')
+                    if not audio_file or not os.path.exists(audio_file):
+                        yield event.plain_result("下载的抖音音频文件不存在！")
+                        return
+
+                    # 如需统一格式，自动转为wav
+                    if not audio_file.endswith(".wav"):
+                        wav_file = os.path.splitext(audio_file)[0] + ".wav"
+                        proc = await asyncio.create_subprocess_exec(
+                            "ffmpeg", "-y", "-i", audio_file, wav_file
+                        )
+                        await proc.communicate()
+                        audio_file = wav_file
+
+                    # 复制音频到input_file
+                    import shutil
+                    shutil.copy(audio_file, input_file)
+
+                    # 设置song_info用于缓存
+                    song_info = {
+                        "aweme_id": video_info.get('aweme_id'),
+                        "title": video_info.get('title'),
+                        "author": video_info.get('author')
+                    }
+
+                except Exception as e:
+                    logger.error(f"处理抖音视频时出错: {str(e)}")
+                    yield event.plain_result(f"处理/下载抖音视频时出错：{str(e)}")
                     return
             elif song_name:
                 try:
@@ -2040,6 +2189,138 @@ class SoVitsSvcPlugin(Star):
             logger.error(f"获取QQ音乐歌曲信息出错: {str(e)}\n{traceback.format_exc()}")
             yield event.plain_result(f"获取QQ音乐歌曲信息时出错：{str(e)}")
 
+    @command("douyin_info")
+    async def get_douyin_info(self, event: AstrMessageEvent):
+        """获取抖音视频信息
+
+        用法：/douyin_info [抖音视频链接]
+        """
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []
+
+        if not args:
+            yield event.plain_result("请提供抖音视频链接！\n用法：/douyin_info [抖音视频链接]")
+            return
+
+        url = args[0]
+
+        try:
+            yield event.plain_result(f"正在获取抖音视频信息：{url}...")
+
+            # 确保抖音下载器已初始化
+            if not self.douyin_api:
+                await self._init_config()
+            
+            # 检查初始化是否成功
+            if not self.douyin_api:
+                yield event.plain_result("抖音下载器初始化失败，请检查配置")
+                return
+
+            # 获取视频信息
+            video_info = await self.douyin_api.get_video_info(url)
+
+            if not video_info:
+                yield event.plain_result("获取抖音视频信息失败：返回空结果")
+                return
+
+            result = "抖音视频信息：\n"
+            result += f"标题：{video_info.get('title', '未知标题')}\n"
+            result += f"作者：{video_info.get('author', '未知作者')}\n"
+            result += f"视频ID：{video_info.get('aweme_id', '未知ID')}\n"
+            result += f"时长：{video_info.get('duration', 0)}秒\n"
+            result += f"创建时间：{video_info.get('create_time', 0)}\n"
+            
+            # 如果有错误信息，显示出来
+            if video_info.get('error'):
+                result += f"错误信息：{video_info.get('error')}\n"
+            if video_info.get('note'):
+                result += f"备注：{video_info.get('note')}\n"
+            result += "\n"
+
+            # 统计信息
+            stats = video_info.get('statistics', {})
+            if stats:
+                result += "统计信息：\n"
+                result += f"点赞：{stats.get('digg_count', 0)}\n"
+                result += f"评论：{stats.get('comment_count', 0)}\n"
+                result += f"分享：{stats.get('share_count', 0)}\n"
+                result += f"收藏：{stats.get('collect_count', 0)}\n\n"
+
+            result += "使用方法：\n"
+            result += f"/唱 [说话人ID] [音调调整] douyin {url}"
+
+            chain = []
+            if video_info.get('cover_url'):
+                try:
+                    chain.append(Comp.Image.fromURL(video_info['cover_url']))
+                except Exception as e:
+                    logger.warning(f"无法加载封面图片: {e}")
+            chain.append(Comp.Plain(result))
+            yield event.chain_result(chain)
+
+        except Exception as e:
+            logger.error(f"获取抖音视频信息出错: {str(e)}\n{traceback.format_exc()}")
+            yield event.plain_result(f"获取抖音视频信息时出错：{str(e)}\n\n请检查：\n1. 网络连接是否正常\n2. 抖音链接是否有效\n3. 是否需要配置代理")
+
+    @command("douyin_download")
+    async def download_douyin_audio(self, event: AstrMessageEvent):
+        """下载抖音音频
+
+        用法：/douyin_download [抖音视频链接] [自定义文件名(可选)]
+        """
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []
+
+        if not args:
+            yield event.plain_result("请提供抖音视频链接！\n用法：/douyin_download [抖音视频链接] [自定义文件名(可选)]")
+            return
+
+        url = args[0]
+        custom_filename = args[1] if len(args) > 1 else None
+
+        try:
+            yield event.plain_result(f"正在下载抖音音频：{url}...")
+
+            # 确保抖音下载器已初始化
+            if not self.douyin_api:
+                await self._init_config()
+            
+            # 检查初始化是否成功
+            if not self.douyin_api:
+                yield event.plain_result("抖音下载器初始化失败，请检查配置")
+                return
+
+            # 下载音频
+            result = await self.douyin_api.download_from_url(url, custom_filename, download_cover=True)
+
+            if not result.get('success'):
+                error_msg = result.get('error', '下载失败')
+                yield event.plain_result(f"下载抖音音频失败：{error_msg}")
+                return
+
+            result_msg = "抖音音频下载成功！\n\n"
+            result_msg += f"标题：{result.get('title', '未知标题')}\n"
+            result_msg += f"作者：{result.get('author', '未知作者')}\n"
+            result_msg += f"文件路径：{result.get('file_path', '未知路径')}\n"
+            result_msg += f"文件大小：{result.get('file_size', 0)} 字节\n"
+            result_msg += f"下载耗时：{result.get('download_duration', 0):.2f} 秒\n"
+
+            if result.get('cover_path'):
+                result_msg += f"封面路径：{result.get('cover_path')}\n"
+
+            result_msg += "\n使用方法：\n"
+            result_msg += f"/唱 [说话人ID] [音调调整] douyin {url}"
+
+            chain = []
+            if result.get('cover_path'):
+                chain.append(Comp.Image.fromFile(result['cover_path']))
+            chain.append(Comp.Plain(result_msg))
+            yield event.chain_result(chain)
+
+        except Exception as e:
+            logger.error(f"下载抖音音频出错: {str(e)}\n{traceback.format_exc()}")
+            yield event.plain_result(f"下载抖音音频时出错：{str(e)}")
+
     @permission_type(PermissionType.ADMIN)
     @command("svc_models", alias=["模型列表"])
     async def show_models(self, event: AstrMessageEvent):
@@ -2090,6 +2371,8 @@ def get_chorus_cache_key(source_type, song_info, input_file):
         return f"bilibili_{song_info['bvid']}", True
     elif source_type == "netease" and song_info and song_info.get("id") and song_info.get("level"):
         return f"netease_{song_info['id']}_{song_info['level']}", True
+    elif source_type == "douyin" and song_info and song_info.get("aweme_id"):
+        return f"douyin_{song_info['aweme_id']}", True
     else:
         return input_file, False
 

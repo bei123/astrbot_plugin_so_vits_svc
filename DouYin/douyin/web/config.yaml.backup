@@ -1,0 +1,55 @@
+TokenManager:
+  douyin:
+    headers:
+      Accept-Language: zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+        like Gecko) Chrome/90.0.4430.212 Safari/537.36
+      Referer: https://www.douyin.com/
+      Cookie: UIFID_TEMP=fd93a02f3f52f94d15e514b5060909b7718dbdccf5e652d020e98a2368c5c67f3a3472bf60b7403202e0449bf8067fb1368687d9ae6e46d676a0080ea21a4f9a112049af62d08b73f5f14871dd34fe6c;
+        hevc_supported=true; xgplayer_user_id=325728968276; fpk1=U2FsdGVkX1+sb3HXxsjx9EoZM0xagwfzb+HL0gH+beRBLs1R74fy5M8LkfD6N21j/HgvlhzqMWyTsNKAWVcK7g==;
+        fpk2=6dbb10952a38c11d19e2648023d5055b; bd_ticket_guard_client_web_domain=2;
+        d_ticket=a9105e379970a4824608b5fd56e2bb8b64e48; passport_assist_user=Cjyr2RR0r_fMujAJTl8MZVM9QH2YkRCiT0rFZ8TIP_gzHZ07bHAD0ZRMPNT_fxNn0TtvYa979wMaCYG2ai8aSgo8PSRmY36diK3s4DZ3DGWDEUdV41bXjmNNU4CTu2wTQTM3CzHvd73_4SzI3SAVhhZ6oy-YlMl7aZ4oBAjCEJbL6g0Yia_WVCABIgED_XzAnw%3D%3D;
+        uid_tt=fd86ce38940d7627ec76590f430cd264; uid_tt_ss=fd86ce38940d7627ec76590f430cd264;
+        sid_tt=b47034c61e4823699cd30e368b4af10d; sessionid=b47034c61e4823699cd30e368b4af10d;
+        sessionid_ss=b47034c61e4823699cd30e368b4af10d; is_staff_user=false; store-region=cn-bj;
+        store-region-src=uid; login_time=1740558630526; SelfTabRedDotControl=%5B%7B%22id%22%3A%227249401459278776357%22%2C%22u%22%3A65%2C%22c%22%3A0%7D%5D;
+        UIFID=fd93a02f3f52f94d15e514b5060909b7718dbdccf5e652d020e98a2368c5c67fe9efcad20f9b498b36fc238fe275b04b0c017abeb8cddb3a62412d883396814f8eb8d466e8e810178ab076e704cc2fe3c43ade6bb7359ff7788538b00095fbbf2ff359ff9766bf658975ce338bb8ec8e989620de84a2b8faa1e3742af6d25f9ddae7d3e362782e593c0117e468d04836ecdca179a32b2197dbe0491315b6d6a7;
+        live_use_vvc=%22false%22; SEARCH_RESULT_LIST_TYPE=%22single%22; xgplayer_device_id=92725592052;
+        __live_version__=%221.1.2.8609%22; enter_pc_once=1; __security_mc_1_s_sdk_crypt_sdk=e5d18138-482d-88a2;
+        __security_mc_1_s_sdk_cert_key=eb08a4d9-4071-9337; __security_mc_1_s_sdk_sign_data_key_web_protect=77ad578b-4f80-ab45;
+        session_tlb_tag=sttt%7C5%7CtHA0xh5II2mc0w42i0rxDf________-oASlSli_N2twVPJicCnk2gDMA6frlnOADw6O1M9ujKNg%3D;
+        s_v_web_id=verify_mdy8b32t_PTUBPVId_iMGB_4OfQ_98Gt_VjkjSaN2CDzL; dy_swidth=1707;
+        dy_sheight=1067; passport_csrf_token=b086edce5ca2cdab22faa035f205e454; passport_csrf_token_default=b086edce5ca2cdab22faa035f205e454;
+        is_dash_user=1; publish_badge_show_info=%220%2C0%2C0%2C1754379587124%22; vdg_s=1;
+        download_guide=%220%2F%2F1%22; WallpaperGuide=%7B%22showTime%22%3A0%2C%22closeTime%22%3A0%2C%22showCount%22%3A0%2C%22cursor1%22%3A16%2C%22cursor2%22%3A4%2C%22hoverTime%22%3A1754419924998%7D;
+        strategyABtestKey=%221754874765.473%22; sid_guard=b47034c61e4823699cd30e368b4af10d%7C1754876248%7C5184000%7CFri%2C+10-Oct-2025+01%3A37%3A28+GMT;
+        sid_ucp_v1=1.0.0-KGNkZGFhNzdhNDI4NmNlYWFkMjgxOTYwMDExOTMzYTRhZGJhYTMyY2YKHwiXg9at6gIQ2JLlxAYY7zEgDDCEmt3WBTgHQPQHSAQaAmxxIiBiNDcwMzRjNjFlNDgyMzY5OWNkMzBlMzY4YjRhZjEwZA;
+        ssid_ucp_v1=1.0.0-KGNkZGFhNzdhNDI4NmNlYWFkMjgxOTYwMDExOTMzYTRhZGJhYTMyY2YKHwiXg9at6gIQ2JLlxAYY7zEgDDCEmt3WBTgHQPQHSAQaAmxxIiBiNDcwMzRjNjFlNDgyMzY5OWNkMzBlMzY4YjRhZjEwZA;
+        __ac_nonce=068994b7300c2de86c50b; __ac_signature=_02B4Z6wo00f01LG--OQAAIDDL9pYdv0fD2SxnvxAAET775;
+        stream_recommend_feed_params=%22%7B%5C%22cookie_enabled%5C%22%3Atrue%2C%5C%22screen_width%5C%22%3A1707%2C%5C%22screen_height%5C%22%3A1067%2C%5C%22browser_online%5C%22%3Atrue%2C%5C%22cpu_core_num%5C%22%3A20%2C%5C%22device_memory%5C%22%3A8%2C%5C%22downlink%5C%22%3A10%2C%5C%22effective_type%5C%22%3A%5C%224g%5C%22%2C%5C%22round_trip_time%5C%22%3A50%7D%22;
+        FOLLOW_NUMBER_YELLOW_POINT_INFO=%22MS4wLjABAAAApN2_2OV60XX5G6n_KC1HnervAukhMZhAD5o8fh2TKlo%2F1754928000000%2F0%2F0%2F1754877987701%22;
+        sdk_source_info=7e276470716a68645a606960273f276364697660272927676c715a6d6069756077273f276364697660272927666d776a68605a607d71606b766c6a6b5a7666776c7571273f275e58272927666a6b766a69605a696c6061273f27636469766027292762696a6764695a7364776c6467696076273f275e582729277672715a646971273f2763646976602729277f6b5a666475273f2763646976602729276d6a6e5a6b6a716c273f2763646976602729276c6b6f5a7f6367273f27636469766027292771273f2735323036363032323d31303234272927676c715a75776a716a666a69273f2763646976602778;
+        bit_env=NQvaObckqzQznW8lvlSehCRUhxL0hkQEVxAJ9DmMT3rmPzZ9LWiyfpuFBqiEQa6ALzKlHYLrYp84wlbq-Y8R9xmFIUCUVwd3hLIrmkyXYzsxVh-Fn0qA5Xw-7R8yU54Bgset5JpUlcx6OkewInSP2ma_-PPRcSr8yKRIc6s3ssr-_-e_ETMay8m0oGC46WNFXXRSEqTDBQ4NoanQK2f19BPhfABZnWNnI4k234W5n-9Q0YTEKrAhHlsStmHZBDVirUhKBUyh5Di5yQgOao1iPhwj2vTTi7IW1bY1FzWhwSZOm1CZnWDMz6To2hTkc_UDwG9uGUTOF02aXZn6_NsqPYGOkV7sQVqTq9v4qGG8JziW2ar2fPI33fQiN9xcgd7odnKRn5GLl-vy-KBh24SgwGL1v1CCQeyiJYH0kfJOn_51wWF88nMkoXL_3RJ8HBzKN0UZ1Fc4ay8XDKJmpSYz2ZxwGORzCTHPD4pIb3QMiJW1hQ3CcBRlOWkw3ODcVv0P;
+        gulu_source_res=eyJwX2luIjoiYTlmMjU3NzAxMWQ2OTIyYjc5NWQ5Zjk3NjY1OWVkOTNkMGQ2NjBjMWZhMmNkYzdjMGI4NmI5YTU2YjlhYmU1OCJ9;
+        passport_auth_mix_state=j99dts8cn2catz8sq19lxmrye5bh4j14; home_can_add_dy_2_desktop=%220%22;
+        FOLLOW_LIVE_POINT_INFO=%22MS4wLjABAAAApN2_2OV60XX5G6n_KC1HnervAukhMZhAD5o8fh2TKlo%2F1754928000000%2F0%2F0%2F1754878280513%22;
+        volume_info=%7B%22isUserMute%22%3Afalse%2C%22isMute%22%3Atrue%2C%22volume%22%3A0.547%7D;
+        bd_ticket_guard_client_data=eyJiZC10aWNrZXQtZ3VhcmQtdmVyc2lvbiI6MiwiYmQtdGlja2V0LWd1YXJkLWl0ZXJhdGlvbi12ZXJzaW9uIjoxLCJiZC10aWNrZXQtZ3VhcmQtcmVlLXB1YmxpYy1rZXkiOiJCQ1B5eUJuRlJaT1FySDVkR1NtczFIbHJ3cEplTisyWWR0bnJCU2NrVGJkY3N6enVlV1p6cGJqZEhZdFZ2cWVtam50Q2ZWUVhNOE9kNlExbjhoU29veFk9IiwiYmQtdGlja2V0LWd1YXJkLXdlYi12ZXJzaW9uIjoyfQ%3D%3D;
+        odin_tt=1f6e3670bc94b184993d76a429f02fc6763888a73608b0b9e1d226bb6902ee6f6335d0a977111ef7549d558d81dae61c7987b828d83bb04da97a359694d85872;
+        ttwid=1%7C3GT2W4bUZOKwYGsLnsIEJt7RmsWVoHlrQEvUP-72ee8%7C1754877686%7C7b6994a837ad92e680e0417596b0b20c3f75b6cdde04302d8a87cc21a7c36286;
+        biz_trace_id=7ede495a; IsDouyinActive=false; stream_player_status_params=%22%7B%5C%22is_auto_play%5C%22%3A0%2C%5C%22is_full_screen%5C%22%3A0%2C%5C%22is_full_webscreen%5C%22%3A0%2C%5C%22is_mute%5C%22%3A1%2C%5C%22is_speed%5C%22%3A1%2C%5C%22is_visible%5C%22%3A1%7D%22;
+        passport_fe_beating_status=false
+    proxies:
+      http: null
+      https: null
+    msToken:
+      url: https://mssdk.bytedance.com/web/report
+      magic: 538969122
+      version: 1
+      dataType: 8
+      strData: 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
+      User-Agent: 5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
+        Gecko) Chrome/117.0.0.0 Safari/537.36 Edg/117.0.2045.47
+    ttwid:
+      url: https://ttwid.bytedance.com/ttwid/union/register/
+      data: '{"region":"cn","aid":1768,"needFid":false,"service":"www.ixigua.com","migrate_info":{"ticket":"","source":"node"},"cbUrlProtocol":"https","union":true}'

@@ -4,3 +4,7 @@ pedalboard
 numpy
 librosa
 qqmusic-api-python
+aiohttp>=3.8.0
+aiofiles>=23.0.0
+pydantic>=1.10.0
+browser-cookie3>=0.19.0
