@@ -81,8 +81,8 @@ class TokenManager:
     ttwid_conf = douyin_manager.get("ttwid", None)
     proxies_conf = douyin_manager.get("proxies", None)
     proxies = {
-        "http://": proxies_conf.get("http", None),
-        "https://": proxies_conf.get("https", None),
+        "http": proxies_conf.get("http", None),
+        "https": proxies_conf.get("https", None),
     }
 
     @classmethod
