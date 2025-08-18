@@ -1573,17 +1573,27 @@ class SoVitsSvcPlugin(Star):
                     not hasattr(event.message_obj, "files")
                     or not event.message_obj.filesx
                 ):
-                    yield event.plain_result(
+                    # 从配置中读取时长限制设置
+                    voice_config = self.config.get("voice_config", {})
+                    enable_duration_limit = voice_config.get("enable_duration_limit", True)
+                    max_duration_limit = voice_config.get("max_duration_limit", 60)
+                    
+                    help_text = (
                         "请上传要转换的音频文件或指定歌曲名！\n"
                         "用法：\n"
-                        "1. /convert_voice [说话人ID] [音调调整] - 上传音频文件\n"
-                        "2. /convert_voice [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
-                        "3. /convert_voice [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
-                        "4. /convert_voice [说话人ID] [音调调整] qq [歌曲名] -m [模型目录] - 搜索QQ音乐（可选指定模型目录）\n"
-                        "5. /convert_voice [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）\n"
-                        "6. /convert_voice [说话人ID] [音调调整] [歌曲名] -q [时长] - 快速截取（跳过前30秒，保留指定时长，默认60秒）\n"
-                        "7. /convert_voice [说话人ID] [音调调整] [歌曲名] -c - 只转换副歌部分"
+                        "1. /唱 [说话人ID] [音调调整] - 上传音频文件\n"
+                        "2. /唱 [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
+                        "3. /唱 [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
+                        "4. /唱 [说话人ID] [音调调整] qq [歌曲名] -m [模型目录] - 搜索QQ音乐（可选指定模型目录）\n"
+                        "5. /唱 [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）\n"
+                        "6. /唱 [说话人ID] [音调调整] [歌曲名] -q [时长] - 快速截取（跳过前30秒，保留指定时长，默认60秒）\n"
+                        "7. /唱 [说话人ID] [音调调整] [歌曲名] -c - 只转换副歌部分"
                     )
+                    
+                    if enable_duration_limit:
+                        help_text += f"\n\n注意：音频时长超过{max_duration_limit}秒时，必须使用 -q 或 -c 参数，或使用更短的音频版本"
+                    
+                    yield event.plain_result(help_text)
                     return
 
                 file = event.message_obj.files[0]
@@ -1635,6 +1645,33 @@ class SoVitsSvcPlugin(Star):
                 logger.info(f"使用缓存: {cached_file}")
                 chain = [Record.fromFileSystem(cached_file)]
                 yield event.chain_result(chain)
+                return
+
+            # 音频文件准备好后，检查音频时长
+            try:
+                audio = AudioSegment.from_file(input_file)
+                total_duration = len(audio) / 1000  # 转换为秒
+                
+                # 从配置中读取时长限制设置
+                voice_config = self.config.get("voice_config", {})
+                enable_duration_limit = voice_config.get("enable_duration_limit", True)
+                max_duration_limit = voice_config.get("max_duration_limit", 60)
+                
+                # 如果启用了时长限制且音频超过限制且没有使用-q或-c参数，则拒绝处理
+                if enable_duration_limit and total_duration > max_duration_limit and not quick_cut and not only_chorus:
+                    yield event.plain_result(
+                        f"音频时长过长（{total_duration:.1f}秒），超过{max_duration_limit}秒限制！\n"
+                        f"请使用以下参数之一：\n"
+                        f"• 加 -q 参数进行快速截取（跳过前30秒，保留指定时长）\n"
+                        f"• 加 -c 参数只转换副歌部分\n"
+                        f"• 或使用更短的音频版本"
+                    )
+                    return
+                    
+                logger.info(f"音频时长检查通过：{total_duration:.1f}秒")
+            except Exception as e:
+                logger.error(f"音频时长检查失败: {str(e)}")
+                yield event.plain_result(f"音频时长检查失败：{str(e)}")
                 return
 
             # 音频文件准备好后，推理前裁切副歌或快速截取

@@ -209,6 +209,18 @@
                 "type": "float",
                 "hint": "默认的交叉参考阈值",
                 "default": 0.05
+            },
+            "enable_duration_limit": {
+                "description": "启用音频时长限制",
+                "type": "bool",
+                "hint": "是否启用音频时长限制，超过1分钟的音频需要使用-q或-c参数",
+                "default": true
+            },
+            "max_duration_limit": {
+                "description": "最大音频时长限制(秒)",
+                "type": "int",
+                "hint": "音频的最大时长限制，超过此时长需要特殊处理",
+                "default": 60
             }
         }
     },
