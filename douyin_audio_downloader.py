@@ -303,7 +303,17 @@ class DouyinAudioDownloader:
         
         # 清理文件名
         safe_filename = self.sanitize_filename(filename)
+        logger.info(f"原始文件名: {filename}")
+        logger.info(f"清理后文件名: {safe_filename} (长度: {len(safe_filename)})")
+        
+        # 如果文件名仍然过长，使用短文件名生成方法
+        if len(safe_filename) > 40:
+            original_safe = safe_filename
+            safe_filename = self.generate_short_filename(safe_filename, 40)
+            logger.info(f"文件名过长，使用短文件名: {safe_filename} (原长度: {len(original_safe)})")
+        
         file_path = self.output_dir / f"{safe_filename}.mp3"
+        logger.info(f"最终文件路径: {file_path}")
         
         # 检查文件是否已存在
         if file_path.exists():
@@ -357,7 +367,17 @@ class DouyinAudioDownloader:
         
         # 清理文件名
         safe_filename = self.sanitize_filename(filename)
+        logger.info(f"封面原始文件名: {filename}")
+        logger.info(f"封面清理后文件名: {safe_filename} (长度: {len(safe_filename)})")
+        
+        # 如果文件名仍然过长，使用短文件名生成方法
+        if len(safe_filename) > 35:  # 封面文件名稍短一些，因为要加上_cover后缀
+            original_safe = safe_filename
+            safe_filename = self.generate_short_filename(safe_filename, 35)
+            logger.info(f"封面文件名过长，使用短文件名: {safe_filename} (原长度: {len(original_safe)})")
+        
         file_path = self.output_dir / f"{safe_filename}_cover.{format}"
+        logger.info(f"封面最终文件路径: {file_path}")
         
         # 检查文件是否已存在
         if file_path.exists():
@@ -447,15 +467,41 @@ class DouyinAudioDownloader:
         safe_name = re.sub(r'\s+', ' ', safe_name).strip()
         safe_name = re.sub(r'\.+', '.', safe_name)
         
-        # 限制长度
-        if len(safe_name) > 100:
-            safe_name = safe_name[:100]
+        # 限制长度 - 考虑到路径长度限制，将文件名限制在50个字符以内
+        if len(safe_name) > 50:
+            # 智能截断：保留前40个字符，添加省略号
+            safe_name = safe_name[:40] + "..."
         
         # 确保文件名不为空
         if not safe_name:
             safe_name = "unknown"
         
         return safe_name
+    
+    def generate_short_filename(self, original_name: str, max_length: int = 30) -> str:
+        """
+        生成短文件名，当原文件名过长时使用
+        
+        Args:
+            original_name: 原始文件名
+            max_length: 最大长度
+            
+        Returns:
+            短文件名
+        """
+        import hashlib
+        
+        # 如果原文件名已经够短，直接返回
+        if len(original_name) <= max_length:
+            return original_name
+        
+        # 生成哈希值
+        hash_obj = hashlib.md5(original_name.encode('utf-8'))
+        hash_hex = hash_obj.hexdigest()[:8]  # 取前8位
+        
+        # 取原文件名的前几个字符 + 哈希值
+        prefix = original_name[:max_length-8-3]  # 减去哈希长度和省略号
+        return f"{prefix}...{hash_hex}"
     
     async def download_audio_from_url(self, url: str, custom_filename: str = None, 
                                     download_cover: bool = False, cover_format: str = "jpg") -> Dict[str, Any]:

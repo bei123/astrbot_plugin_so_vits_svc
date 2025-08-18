@@ -37,6 +37,47 @@ from .song import detect_chorus_api
 import astrbot.api.message_components as Comp
 import re
 
+def extract_douyin_urls(text: str) -> List[str]:
+    """
+    从文本中提取抖音链接
+    
+    Args:
+        text: 包含抖音链接的文本
+        
+    Returns:
+        提取到的抖音链接列表
+    """
+    # 抖音链接的正则表达式模式
+    douyin_patterns = [
+        r'https?://v\.douyin\.com/[a-zA-Z0-9]+/?',  # 短链接格式
+        r'https?://www\.douyin\.com/video/\d+',    # 标准视频链接
+        r'https?://www\.douyin\.com/[\w/]+',       # 其他抖音链接
+        r'https?://iesdouyin\.com/share/video/\d+', # 分享链接格式
+    ]
+    
+    urls = []
+    for pattern in douyin_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        urls.extend(matches)
+    
+    # 去重并返回
+    return list(set(urls))
+
+def extract_douyin_url(text: str) -> Optional[str]:
+    """
+    从文本中提取第一个抖音链接
+    
+    Args:
+        text: 包含抖音链接的文本
+        
+    Returns:
+        第一个找到的抖音链接，如果没有找到返回None
+    """
+    urls = extract_douyin_urls(text)
+    return urls[0] if urls else None
+
+
+
 class MSSTProcessor:
     """MSST 音频处理器"""
 
@@ -1421,7 +1462,13 @@ class SoVitsSvcPlugin(Star):
                     return
             elif source_type == "douyin" and song_name:
                 try:
-                    yield event.plain_result(f"正在处理抖音视频：{song_name}...")
+                    # 尝试从输入中提取抖音链接
+                    douyin_url = extract_douyin_url(song_name)
+                    if not douyin_url:
+                        yield event.plain_result(f"未在输入中找到抖音链接：{song_name}\n\n支持的链接格式：\n- https://v.douyin.com/xxxxx/\n- https://www.douyin.com/video/xxxxx\n- https://iesdouyin.com/share/video/xxxxx")
+                        return
+                    
+                    yield event.plain_result(f"正在处理抖音视频：{douyin_url}...")
 
                     # 确保抖音下载器已初始化
                     if not self.douyin_api:
@@ -1433,7 +1480,7 @@ class SoVitsSvcPlugin(Star):
                         return
 
                     # 获取视频信息
-                    video_info = await self.douyin_api.get_video_info(song_name)
+                    video_info = await self.douyin_api.get_video_info(douyin_url)
                     
                     if not video_info or not video_info.get('success', True):
                         error_msg = video_info.get('error', '未知错误') if video_info else '获取失败'
@@ -1466,7 +1513,7 @@ class SoVitsSvcPlugin(Star):
                     yield event.chain_result(chain)
 
                     # 下载音频
-                    result = await self.douyin_api.download_from_url(song_name, download_cover=False)
+                    result = await self.douyin_api.download_from_url(douyin_url, download_cover=False)
                     
                     if not result.get('success'):
                         error_msg = result.get('error', '下载失败')
@@ -2251,16 +2298,22 @@ class SoVitsSvcPlugin(Star):
     async def get_douyin_info(self, event: AstrMessageEvent):
         """获取抖音视频信息
 
-        用法：/douyin_info [抖音视频链接]
+        用法：/douyin_info [抖音视频链接或包含链接的文本]
         """
         message = event.message_str.strip()
         args = message.split()[1:] if message else []
 
         if not args:
-            yield event.plain_result("请提供抖音视频链接！\n用法：/douyin_info [抖音视频链接]")
+            yield event.plain_result("请提供抖音视频链接！\n用法：/douyin_info [抖音视频链接或包含链接的文本]")
             return
 
-        url = args[0]
+        # 尝试从输入中提取抖音链接
+        input_text = " ".join(args)
+        url = extract_douyin_url(input_text)
+        
+        if not url:
+            yield event.plain_result(f"未在输入文本中找到抖音链接：\n{input_text}\n\n支持的链接格式：\n- https://v.douyin.com/xxxxx/\n- https://www.douyin.com/video/xxxxx\n- https://iesdouyin.com/share/video/xxxxx")
+            return
 
         try:
             yield event.plain_result(f"正在获取抖音视频信息：{url}...")
@@ -2324,17 +2377,31 @@ class SoVitsSvcPlugin(Star):
     async def download_douyin_audio(self, event: AstrMessageEvent):
         """下载抖音音频
 
-        用法：/douyin_download [抖音视频链接] [自定义文件名(可选)]
+        用法：/douyin_download [抖音视频链接或包含链接的文本] [自定义文件名(可选)]
         """
         message = event.message_str.strip()
         args = message.split()[1:] if message else []
 
         if not args:
-            yield event.plain_result("请提供抖音视频链接！\n用法：/douyin_download [抖音视频链接] [自定义文件名(可选)]")
+            yield event.plain_result("请提供抖音视频链接！\n用法：/douyin_download [抖音视频链接或包含链接的文本] [自定义文件名(可选)]")
             return
 
-        url = args[0]
-        custom_filename = args[1] if len(args) > 1 else None
+        # 尝试从输入中提取抖音链接
+        input_text = " ".join(args)
+        url = extract_douyin_url(input_text)
+        
+        if not url:
+            yield event.plain_result(f"未在输入文本中找到抖音链接：\n{input_text}\n\n支持的链接格式：\n- https://v.douyin.com/xxxxx/\n- https://www.douyin.com/video/xxxxx\n- https://iesdouyin.com/share/video/xxxxx")
+            return
+        
+        # 检查是否还有自定义文件名参数
+        custom_filename = None
+        if len(args) > 1:
+            # 如果第一个参数不是链接，可能是自定义文件名
+            if not extract_douyin_url(args[0]):
+                custom_filename = args[0]
+            elif len(args) > 2:
+                custom_filename = args[2]
 
         try:
             yield event.plain_result(f"正在下载抖音音频：{url}...")
@@ -2440,3 +2507,5 @@ def extract_bvid(text):
     if match:
         return match.group(1)
     return text.strip()
+
+
