@@ -966,7 +966,9 @@ class SoVitsSvcPlugin(Star):
         try:
             # 从配置中获取命令别名
             command_config = self.config.get("command_config", {})
+            logger.info(f"读取到的command_config: {command_config}")
             aliases = command_config.get("convert_command_aliases", ["牢剑唱", "转换"])
+            logger.info(f"读取到的aliases: {aliases}")
             
             # 确保aliases是列表类型
             if isinstance(aliases, str):
@@ -1153,8 +1155,58 @@ class SoVitsSvcPlugin(Star):
 
         yield event.plain_result(status)
 
-    @filter.command("唱", alias={"牢剑唱", "转换"})
+    @filter.command("唱")
     async def convert_voice(self, event: AstrMessageEvent):
+        """转换语音 - 主命令"""
+        async for result in self._handle_convert_voice(event):
+            yield result
+
+    @filter.regex(r"^(?:/)?(.+?)(?:\s+(.+))?$")
+    async def on_convert_alias(self, event: AstrMessageEvent) -> None:
+        """处理语音转换别名命令 - 动态别名支持
+        
+        Args:
+            event: 消息事件对象
+        """
+        message = event.message_str.strip()
+        logger.info(f"on_convert_alias 收到消息: {message}")
+        
+        # 获取配置的别名
+        aliases = getattr(self, 'convert_command_aliases', ["牢剑唱", "转换"])
+        if not aliases:
+            aliases = ["牢剑唱", "转换"]
+        
+        logger.info(f"当前配置的别名: {aliases}")
+        
+        # 提取命令和参数
+        import re
+        match = re.match(r"^(?:/)?(.+?)(?:\s+(.+))?$", message)
+        if not match:
+            logger.info(f"消息 '{message}' 不匹配正则表达式")
+            return
+            
+        command = match.group(1).strip()
+        args = match.group(2).strip() if match.group(2) else ""
+        
+        logger.info(f"提取的命令: '{command}'，参数: '{args}'")
+        
+        # 检查是否是配置的别名
+        if command in aliases:
+            logger.info(f"检测到别名命令: {command}，参数: {args}")
+            # 重写消息为标准格式
+            new_message = f"/唱 {args}".strip()
+            event.message_str = new_message
+            logger.info(f"重写消息为: {new_message}")
+            
+            # 调用主命令处理函数
+            async for result in self._handle_convert_voice(event):
+                yield result
+        else:
+            logger.info(f"命令 '{command}' 不在别名列表中")
+        
+
+        
+    async def _handle_convert_voice(self, event: AstrMessageEvent):
         """转换语音"""
         # 生成任务ID（在函数开始就定义，避免后续引用错误）
         task_id = str(uuid.uuid4())
@@ -1654,6 +1706,8 @@ class SoVitsSvcPlugin(Star):
                     
                     # 获取当前配置的别名
                     aliases = getattr(self, 'convert_command_aliases', ["牢剑唱", "转换"])
+                    if not aliases:
+                        aliases = ["牢剑唱", "转换"]
                     alias_text = ", ".join([f"/{alias}" for alias in aliases])
                     
                     help_text = (
@@ -2529,66 +2583,8 @@ class SoVitsSvcPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"获取模型列表失败：{str(e)}\n{traceback.format_exc()}")
 
-    @permission_type(PermissionType.ADMIN)
-    @command("svc_command_aliases", alias=["命令别名"])
-    async def manage_command_aliases(self, event: AstrMessageEvent):
-        """管理转换命令的别名
 
-        用法：/svc_command_aliases - 查看当前别名
-              /svc_command_aliases set [别名1] [别名2] ... - 设置新的别名列表
-        """
-        message = event.message_str.strip()
-        args = message.split()[1:] if message else []
 
-        try:
-            if len(args) == 0:
-                # 显示当前别名
-                command_config = self.config.get("command_config", {})
-                current_aliases = command_config.get("convert_command_aliases", ["牢剑唱", "转换"])
-                
-                result = "当前转换命令别名：\n"
-                result += f"主命令：/唱\n"
-                result += f"别名：{', '.join([f'/{alias}' for alias in current_aliases])}\n\n"
-                result += "用法：\n"
-                result += "/svc_command_aliases set [别名1] [别名2] ... - 设置新的别名列表\n"
-                result += "示例：/svc_command_aliases set 唱歌 转换 变声"
-                
-                yield event.plain_result(result)
-                return
-
-            if args[0] == "set" and len(args) > 1:
-                # 设置新的别名
-                new_aliases = args[1:]
-                
-                # 验证别名格式
-                for alias in new_aliases:
-                    if not alias.isalnum() and not all(c.isalnum() or c in ['_', '-'] for c in alias):
-                        yield event.plain_result(f"别名 '{alias}' 格式不正确！别名只能包含字母、数字、下划线和连字符。")
-                        return
-                
-                # 更新配置
-                if "command_config" not in self.config:
-                    self.config["command_config"] = {}
-                
-                self.config["command_config"]["convert_command_aliases"] = new_aliases
-                self.config.save_config()
-                
-                # 重新注册命令
-                self._register_commands()
-                
-                result = f"已成功设置新的命令别名！\n"
-                result += f"主命令：/唱\n"
-                result += f"新别名：{', '.join([f'/{alias}' for alias in new_aliases])}\n\n"
-                result += "注意：别名更改后需要重启插件才能生效。"
-                
-                yield event.plain_result(result)
-                return
-
-            yield event.plain_result("用法：\n/svc_command_aliases - 查看当前别名\n/svc_command_aliases set [别名1] [别名2] ... - 设置新的别名列表")
-
-        except Exception as e:
-            logger.error(f"管理命令别名时出错: {str(e)}\n{traceback.format_exc()}")
-            yield event.plain_result(f"管理命令别名时出错：{str(e)}")
 
 def get_chorus_cache_key(source_type, song_info, input_file):
     if source_type == "qqmusic" and song_info and song_info.get("songmid") and song_info.get("level"):
