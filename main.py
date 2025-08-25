@@ -1202,12 +1202,15 @@ class SoVitsSvcPlugin(Star):
     @filter.command("唱", alias={"牢剑唱", "转换"})
     async def convert_voice(self, event: AstrMessageEvent):
         """转换语音"""
+        # 生成任务ID（在函数开始就定义，避免后续引用错误）
+        task_id = str(uuid.uuid4())
+        
         try:
             # 解析参数
             message = event.message_str.strip()
             args = message.split()[1:] if message else []
-            speaker_id = None
-            pitch_adjust = None
+            speaker_id = 0  # 默认说话人ID为0
+            pitch_adjust = 0  # 默认音调调整为0
             song_name = None
             source_type = "file"  # 默认为文件上传
             model_dir = None  # 默认使用配置中的模型目录
@@ -1232,38 +1235,74 @@ class SoVitsSvcPlugin(Star):
                     args.pop(3)  # 移除时长参数
 
             # 参数解析阶段，只设置变量，不做下载和处理
-            if len(args) >= 2:
-                speaker_id = args[0]
+            if len(args) >= 1:
+                # 首先检查第一个参数是否是数字（说话人ID）
                 try:
-                    pitch_adjust = int(args[1])
-                    if not -12 <= pitch_adjust <= 12:
-                        raise ValueError("音调调整必须在-12到12之间")
-                except ValueError as e:
-                    yield event.plain_result(f"参数错误：{str(e)}")
-                    return
+                    speaker_id = int(args[0])
+                    # 如果第一个参数是数字，继续检查第二个参数
+                    if len(args) >= 2:
+                        try:
+                            pitch_adjust = int(args[1])
+                            if not -12 <= pitch_adjust <= 12:
+                                raise ValueError("音调调整必须在-12到12之间")
+                        except ValueError as e:
+                            yield event.plain_result(f"音调调整参数错误：{str(e)}")
+                            return
+                    
+                    # 如果前两个参数都是数字，检查第三个参数是否是来源类型
+                    if len(args) > 2:
+                        if args[2].lower() == "bilibili":
+                            source_type = "bilibili"
+                            if len(args) > 3:
+                                # 检查是否指定了模型目录
+                                model_index = -1
+                                for i, arg in enumerate(args):
+                                    if arg == "-m" and i + 1 < len(args):
+                                        model_index = i
+                                        break
 
-                if len(args) > 2:
-                    # 检查是否指定了来源类型
-                    if args[2].lower() == "bilibili":
-                        source_type = "bilibili"
-                        if len(args) > 3:
-                            # 检查是否指定了模型目录
-                            model_index = -1
-                            for i, arg in enumerate(args):
-                                if arg == "-m" and i + 1 < len(args):
-                                    model_index = i
-                                    break
+                                if model_index != -1:
+                                    # 如果找到了-m参数，提取模型目录和BV号
+                                    model_dir = args[model_index + 1]
+                                    song_name = " ".join(args[3:model_index])
+                                else:
+                                    # 如果没有找到-m参数，整个剩余部分都是BV号
+                                    song_name = " ".join(args[3:])
+                        elif args[2].lower() == "qq":
+                            source_type = "qqmusic"
+                            if len(args) > 3:
+                                # 检查是否指定了模型目录
+                                model_index = -1
+                                for i, arg in enumerate(args):
+                                    if arg == "-m" and i + 1 < len(args):
+                                        model_index = i
+                                        break
 
-                            if model_index != -1:
-                                # 如果找到了-m参数，提取模型目录和BV号
-                                model_dir = args[model_index + 1]
-                                song_name = " ".join(args[3:model_index])
-                            else:
-                                # 如果没有找到-m参数，整个剩余部分都是BV号
-                                song_name = " ".join(args[3:])
-                    elif args[2].lower() == "qq":
-                        source_type = "qqmusic"
-                        if len(args) > 3:
+                                if model_index != -1:
+                                    # 如果找到了-m参数，提取模型目录和歌曲名
+                                    model_dir = args[model_index + 1]
+                                    song_name = " ".join(args[3:model_index])
+                                else:
+                                    # 如果没有找到-m参数，整个剩余部分都是歌曲名
+                                    song_name = " ".join(args[3:])
+                        elif args[2].lower() == "douyin":
+                            source_type = "douyin"
+                            if len(args) > 3:
+                                # 检查是否指定了模型目录
+                                model_index = -1
+                                for i, arg in enumerate(args):
+                                    if arg == "-m" and i + 1 < len(args):
+                                        model_index = i
+                                        break
+
+                                if model_index != -1:
+                                    # 如果找到了-m参数，提取模型目录和抖音链接
+                                    model_dir = args[model_index + 1]
+                                    song_name = " ".join(args[3:model_index])
+                                else:
+                                    # 如果没有找到-m参数，整个剩余部分都是抖音链接
+                                    song_name = " ".join(args[3:])
+                        else:
                             # 检查是否指定了模型目录
                             model_index = -1
                             for i, arg in enumerate(args):
@@ -1274,13 +1313,49 @@ class SoVitsSvcPlugin(Star):
                             if model_index != -1:
                                 # 如果找到了-m参数，提取模型目录和歌曲名
                                 model_dir = args[model_index + 1]
-                                song_name = " ".join(args[3:model_index])
+                                song_name = " ".join(args[2:model_index])
                             else:
                                 # 如果没有找到-m参数，整个剩余部分都是歌曲名
-                                song_name = " ".join(args[3:])
-                    elif args[2].lower() == "douyin":
+                                song_name = " ".join(args[2:])
+                except ValueError:
+                    # 如果第一个参数不是数字，检查是否是来源类型
+                    if args[0].lower() == "bilibili":
+                        source_type = "bilibili"
+                        if len(args) > 1:
+                            # 检查是否指定了模型目录
+                            model_index = -1
+                            for i, arg in enumerate(args):
+                                if arg == "-m" and i + 1 < len(args):
+                                    model_index = i
+                                    break
+
+                            if model_index != -1:
+                                # 如果找到了-m参数，提取模型目录和BV号
+                                model_dir = args[model_index + 1]
+                                song_name = " ".join(args[1:model_index])
+                            else:
+                                # 如果没有找到-m参数，整个剩余部分都是BV号
+                                song_name = " ".join(args[1:])
+                    elif args[0].lower() == "qq":
+                        source_type = "qqmusic"
+                        if len(args) > 1:
+                            # 检查是否指定了模型目录
+                            model_index = -1
+                            for i, arg in enumerate(args):
+                                if arg == "-m" and i + 1 < len(args):
+                                    model_index = i
+                                    break
+
+                            if model_index != -1:
+                                # 如果找到了-m参数，提取模型目录和歌曲名
+                                model_dir = args[model_index + 1]
+                                song_name = " ".join(args[1:model_index])
+                            else:
+                                # 如果没有找到-m参数，整个剩余部分都是歌曲名
+                                song_name = " ".join(args[1:])
+                    elif args[0].lower() == "douyin":
                         source_type = "douyin"
-                        if len(args) > 3:
+                        if len(args) > 1:
                             # 检查是否指定了模型目录
                             model_index = -1
                             for i, arg in enumerate(args):
@@ -1291,11 +1366,12 @@ class SoVitsSvcPlugin(Star):
                             if model_index != -1:
                                 # 如果找到了-m参数，提取模型目录和抖音链接
                                 model_dir = args[model_index + 1]
-                                song_name = " ".join(args[3:model_index])
+                                song_name = " ".join(args[1:model_index])
                             else:
                                 # 如果没有找到-m参数，整个剩余部分都是抖音链接
-                                song_name = " ".join(args[3:])
+                                song_name = " ".join(args[1:])
                     else:
+                        # 如果第一个参数既不是数字也不是来源类型，可能是歌曲名
                         # 检查是否指定了模型目录
                         model_index = -1
                         for i, arg in enumerate(args):
@@ -1306,10 +1382,10 @@ class SoVitsSvcPlugin(Star):
                         if model_index != -1:
                             # 如果找到了-m参数，提取模型目录和歌曲名
                             model_dir = args[model_index + 1]
-                            song_name = " ".join(args[2:model_index])
+                            song_name = " ".join(args[0:model_index])
                         else:
                             # 如果没有找到-m参数，整个剩余部分都是歌曲名
-                            song_name = " ".join(args[2:])
+                            song_name = " ".join(args[0:])
 
             # 生成临时文件路径
             input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
@@ -1317,9 +1393,6 @@ class SoVitsSvcPlugin(Star):
             mixed_file = os.path.join(self.temp_dir, f"mixed_{uuid.uuid4()}.wav")
             vocal_file = os.path.join(self.temp_dir, f"vocal_{uuid.uuid4()}.wav")
             inst_file = os.path.join(self.temp_dir, f"inst_{uuid.uuid4()}.wav")
-
-            # 生成任务ID
-            task_id = str(uuid.uuid4())
 
             # 统一用 source_type 进入分支
             song_info = None
@@ -1628,13 +1701,16 @@ class SoVitsSvcPlugin(Star):
                     help_text = (
                         "请上传要转换的音频文件或指定歌曲名！\n"
                         "用法：\n"
-                        "1. /唱 [说话人ID] [音调调整] - 上传音频文件\n"
-                        "2. /唱 [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
-                        "3. /唱 [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
-                        "4. /唱 [说话人ID] [音调调整] qq [歌曲名] -m [模型目录] - 搜索QQ音乐（可选指定模型目录）\n"
-                        "5. /唱 [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）\n"
-                        "6. /唱 [说话人ID] [音调调整] [歌曲名] -q [时长] - 快速截取（跳过前30秒，保留指定时长，默认60秒）\n"
-                        "7. /唱 [说话人ID] [音调调整] [歌曲名] -c - 只转换副歌部分"
+                        "1. /唱 - 上传音频文件（使用默认参数：说话人ID=0，音调调整=0）\n"
+                        "2. /唱 [说话人ID] - 上传音频文件（指定说话人ID，音调调整默认为0）\n"
+                        "3. /唱 [说话人ID] [音调调整] - 上传音频文件（指定说话人ID和音调调整）\n"
+                        "4. /唱 [说话人ID] [音调调整] [歌曲名] - 搜索网易云音乐\n"
+                        "5. /唱 [说话人ID] [音调调整] bilibili [BV号或链接] - 转换哔哩哔哩视频\n"
+                        "6. /唱 [说话人ID] [音调调整] qq [歌曲名] -m [模型目录] - 搜索QQ音乐（可选指定模型目录）\n"
+                        "7. /唱 [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）\n"
+                        "8. /唱 [说话人ID] [音调调整] [歌曲名] -q [时长] - 快速截取（跳过前30秒，保留指定时长，默认60秒）\n"
+                        "9. /唱 [说话人ID] [音调调整] [歌曲名] -c - 只转换副歌部分\n"
+                        "\n注意：说话人ID和音调调整参数是可选的，如果不填写将使用默认值（0 0）"
                     )
                     
                     if enable_duration_limit:
@@ -2221,7 +2297,8 @@ class SoVitsSvcPlugin(Star):
                     result += f"{part['index']}. {part['title']} ({part['duration']})\n"
 
             result += "\n使用方法：\n"
-            result += f"/唱 [说话人ID] [音调调整] bilibili {url_or_bvid}"
+            result += f"/唱 [说话人ID] [音调调整] bilibili {url_or_bvid}\n"
+            result += f"或使用默认参数：/唱 bilibili {url_or_bvid}"
 
             chain = []
             if video_info.get("pic"):
@@ -2286,7 +2363,8 @@ class SoVitsSvcPlugin(Star):
                 result += f"   时长：{duration}秒\n\n"
 
             result += "使用方法：\n"
-            result += f"/convert_voice [说话人ID] [音调调整] qq {song_name}"
+            result += f"/唱 [说话人ID] [音调调整] qq {song_name}\n"
+            result += f"或使用默认参数：/唱 qq {song_name}"
 
             yield event.plain_result(result)
 
@@ -2358,7 +2436,8 @@ class SoVitsSvcPlugin(Star):
                 result += f"收藏：{stats.get('collect_count', 0)}\n\n"
 
             result += "使用方法：\n"
-            result += f"/唱 [说话人ID] [音调调整] douyin {url}"
+            result += f"/唱 [说话人ID] [音调调整] douyin {url}\n"
+            result += f"或使用默认参数：/唱 douyin {url}"
 
             chain = []
             if video_info.get('cover_url'):
@@ -2434,7 +2513,8 @@ class SoVitsSvcPlugin(Star):
                 result_msg += f"封面路径：{result.get('cover_path')}\n"
 
             result_msg += "\n使用方法：\n"
-            result_msg += f"/唱 [说话人ID] [音调调整] douyin {url}"
+            result_msg += f"/唱 [说话人ID] [音调调整] douyin {url}\n"
+            result_msg += f"或使用默认参数：/唱 douyin {url}"
 
             chain = []
             if result.get('cover_path'):
