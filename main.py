@@ -957,6 +957,34 @@ class SoVitsSvcPlugin(Star):
         
         # 初始化时更新抖音配置
         self._update_douyin_config()
+        
+        # 动态注册命令（从配置中读取别名）
+        self._register_commands()
+        
+    def _register_commands(self):
+        """读取命令别名配置"""
+        try:
+            # 从配置中获取命令别名
+            command_config = self.config.get("command_config", {})
+            aliases = command_config.get("convert_command_aliases", ["牢剑唱", "转换"])
+            
+            # 确保aliases是列表类型
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            elif not isinstance(aliases, list):
+                aliases = ["牢剑唱", "转换"]
+            
+            # 记录当前使用的别名
+            logger.info(f"转换命令别名: {aliases}")
+            
+            # 将别名存储到实例变量中，供其他地方使用
+            self.convert_command_aliases = aliases
+            
+        except Exception as e:
+            logger.error(f"读取命令别名配置时出错: {str(e)}")
+            # 如果读取失败，使用默认别名
+            logger.info("使用默认命令别名: ['牢剑唱', '转换']")
+            self.convert_command_aliases = ["牢剑唱", "转换"]
 
     @staticmethod
     def config(config: AstrBotConfig) -> Dict:
@@ -968,155 +996,81 @@ class SoVitsSvcPlugin(Star):
         Returns:
             Dict: 配置结构定义
         """
-        return {
-            "so_vits_svc_api": {
-                "description": "So-Vits-SVC API 插件配置",
-                "type": "object",
-                "items": {
-                    "base_setting": {
-                        "description": "基础设置",
+        try:
+            # 从 _conf_schema.json 文件中读取配置结构
+            import json
+            import os
+            
+            # 获取当前文件所在目录
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            schema_file = os.path.join(current_dir, "_conf_schema.json")
+            
+            if os.path.exists(schema_file):
+                with open(schema_file, 'r', encoding='utf-8') as f:
+                    schema_config = json.load(f)
+                
+                # 返回包装在 so_vits_svc_api 下的配置结构
+                return {
+                    "so_vits_svc_api": {
+                        "description": "So-Vits-SVC API 插件配置",
+                        "type": "object",
+                        "items": schema_config
+                    }
+                }
+            else:
+                logger.warning(f"配置文件 {schema_file} 不存在，使用默认配置")
+                # 如果文件不存在，返回默认配置
+                return {
+                    "so_vits_svc_api": {
+                        "description": "So-Vits-SVC API 插件配置",
                         "type": "object",
                         "items": {
-                            "base_url": {
-                                "description": "API服务器地址",
-                                "type": "string",
-                                "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
-                                "default": "http://localhost:1145",
-                            },
-                            "timeout": {
-                                "description": "请求超时时间(秒)",
-                                "type": "integer",
-                                "hint": "转换请求的超时时间",
-                                "default": 300,
-                            },
-                            "msst_url": {
-                                "description": "MSST-WebUI API地址",
-                                "type": "string",
-                                "hint": "MSST-WebUI 的 API 地址",
-                                "default": "http://localhost:9000",
-                            },
-                            "msst_preset": {
-                                "description": "MSST预设文件路径",
-                                "type": "string",
-                                "hint": "MSST 处理使用的预设文件路径",
-                                "default": "wav.json",
-                            },
-                            "model_dir": {
-                                "description": "默认模型目录",
-                                "type": "string",
-                                "hint": "默认使用的模型目录名称",
-                                "default": "default",
-                            },
-                            "netease_cookie": {
-                                "description": "网易云音乐Cookie",
-                                "type": "string",
-                                "hint": "用于访问网易云音乐API的Cookie",
-                                "default": "",
-                            },
-                            "douyin_download_dir": {
-                                "description": "抖音音频下载目录",
-                                "type": "string",
-                                "hint": "抖音音频文件的下载保存目录",
-                                "default": "data/downloads/douyin",
-                            },
-                            "douyin_timeout": {
-                                "description": "抖音下载超时时间(秒)",
-                                "type": "integer",
-                                "hint": "抖音音频下载的超时时间",
-                                "default": 60,
-                            },
-                            "douyin_max_retries": {
-                                "description": "抖音下载最大重试次数",
-                                "type": "integer",
-                                "hint": "抖音音频下载失败时的最大重试次数",
-                                "default": 3,
-                            },
-                        },
-                    },
-                    "voice_config": {
-                        "description": "语音转换设置",
-                        "type": "object",
-                        "hint": "语音转换的相关参数设置",
-                        "items": {
-                            "max_queue_size": {
-                                "description": "最大队列大小",
-                                "type": "integer",
-                                "hint": "超过此队列大小将拒绝新的转换请求",
-                                "default": 100,
-                            },
-                            "default_speaker": {
-                                "description": "默认说话人ID",
-                                "type": "string",
-                                "hint": "默认使用的说话人ID",
-                                "default": "0",
-                            },
-                            "default_pitch": {
-                                "description": "默认音调调整",
-                                "type": "integer",
-                                "hint": "默认的音调调整值，范围-12到12",
-                                "default": 0,
-                            },
-                        },
-                    },
-                    "mixing_config": {
-                        "description": "混音设置",
-                        "type": "object",
-                        "hint": "混音处理的相关参数设置",
-                        "items": {
-                            "sample_rate": {
-                                "description": "采样率",
-                                "type": "integer",
-                                "hint": "音频处理的采样率",
-                                "default": 44100,
-                            },
-                            "headroom": {
-                                "description": "伴奏增益",
-                                "type": "number",
-                                "hint": "伴奏的音量增益，单位dB",
-                                "default": -8,
-                            },
-                            "voc_input": {
-                                "description": "人声输入增益",
-                                "type": "number",
-                                "hint": "人声的输入增益，单位dB",
-                                "default": -4,
-                            },
-                            "revb_gain": {
-                                "description": "混响增益",
-                                "type": "number",
-                                "hint": "混响效果的增益，单位dB",
-                                "default": 0,
-                            },
-                        },
-                    },
-                    "cache_config": {
-                        "description": "缓存设置",
-                        "type": "object",
-                        "hint": "缓存相关的配置参数",
-                        "items": {
-                            "cache_dir": {
-                                "description": "缓存目录",
-                                "type": "string",
-                                "hint": "存储缓存文件的目录路径",
-                                "default": "data/cache/so-vits-svc"
-                            },
-                            "max_cache_size": {
-                                "description": "最大缓存大小(字节)",
-                                "type": "integer",
-                                "hint": "缓存的最大容量，默认1GB",
-                                "default": 1073741824
-                            },
-                            "max_cache_age": {
-                                "description": "最大缓存时间(秒)",
-                                "type": "integer",
-                                "hint": "缓存文件的最大保存时间，默认7天",
-                                "default": 604800
+                            "command_config": {
+                                "description": "命令设置",
+                                "type": "object",
+                                "hint": "命令相关的配置参数",
+                                "items": {
+                                    "convert_command_aliases": {
+                                        "description": "转换命令别名",
+                                        "type": "array",
+                                        "hint": "转换命令的别名列表，可以自定义多个别名",
+                                        "default": ["牢剑唱", "转换"],
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                },
+                }
+        except Exception as e:
+            logger.error(f"读取配置文件时出错: {str(e)}")
+            # 如果读取失败，返回默认配置
+            return {
+                "so_vits_svc_api": {
+                    "description": "So-Vits-SVC API 插件配置",
+                    "type": "object",
+                    "items": {
+                        "command_config": {
+                            "description": "命令设置",
+                            "type": "object",
+                            "hint": "命令相关的配置参数",
+                            "items": {
+                                "convert_command_aliases": {
+                                    "description": "转换命令别名",
+                                    "type": "array",
+                                    "hint": "转换命令的别名列表，可以自定义多个别名",
+                                    "default": ["牢剑唱", "转换"],
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        }
 
     def _update_douyin_config(self) -> None:
         """更新抖音配置 - 从实际配置中读取cookie并更新到config.yaml"""
@@ -1698,8 +1652,13 @@ class SoVitsSvcPlugin(Star):
                     enable_duration_limit = voice_config.get("enable_duration_limit", True)
                     max_duration_limit = voice_config.get("max_duration_limit", 60)
                     
+                    # 获取当前配置的别名
+                    aliases = getattr(self, 'convert_command_aliases', ["牢剑唱", "转换"])
+                    alias_text = ", ".join([f"/{alias}" for alias in aliases])
+                    
                     help_text = (
                         "请上传要转换的音频文件或指定歌曲名！\n"
+                        f"可用命令：/唱 或 {alias_text}\n"
                         "用法：\n"
                         "1. /唱 - 上传音频文件（使用默认参数：说话人ID=0，音调调整=0）\n"
                         "2. /唱 [说话人ID] - 上传音频文件（指定说话人ID，音调调整默认为0）\n"
@@ -1710,7 +1669,8 @@ class SoVitsSvcPlugin(Star):
                         "7. /唱 [说话人ID] [音调调整] [歌曲名] -m [模型目录] - 使用指定模型目录转换（可选）\n"
                         "8. /唱 [说话人ID] [音调调整] [歌曲名] -q [时长] - 快速截取（跳过前30秒，保留指定时长，默认60秒）\n"
                         "9. /唱 [说话人ID] [音调调整] [歌曲名] -c - 只转换副歌部分\n"
-                        "\n注意：说话人ID和音调调整参数是可选的，如果不填写将使用默认值（0 0）"
+                        "\n注意：说话人ID和音调调整参数是可选的，如果不填写将使用默认值（0 0）\n"
+                        f"注意：您也可以使用别名 {alias_text} 来执行相同的功能"
                     )
                     
                     if enable_duration_limit:
@@ -2568,6 +2528,67 @@ class SoVitsSvcPlugin(Star):
 
         except Exception as e:
             yield event.plain_result(f"获取模型列表失败：{str(e)}\n{traceback.format_exc()}")
+
+    @permission_type(PermissionType.ADMIN)
+    @command("svc_command_aliases", alias=["命令别名"])
+    async def manage_command_aliases(self, event: AstrMessageEvent):
+        """管理转换命令的别名
+
+        用法：/svc_command_aliases - 查看当前别名
+              /svc_command_aliases set [别名1] [别名2] ... - 设置新的别名列表
+        """
+        message = event.message_str.strip()
+        args = message.split()[1:] if message else []
+
+        try:
+            if len(args) == 0:
+                # 显示当前别名
+                command_config = self.config.get("command_config", {})
+                current_aliases = command_config.get("convert_command_aliases", ["牢剑唱", "转换"])
+                
+                result = "当前转换命令别名：\n"
+                result += f"主命令：/唱\n"
+                result += f"别名：{', '.join([f'/{alias}' for alias in current_aliases])}\n\n"
+                result += "用法：\n"
+                result += "/svc_command_aliases set [别名1] [别名2] ... - 设置新的别名列表\n"
+                result += "示例：/svc_command_aliases set 唱歌 转换 变声"
+                
+                yield event.plain_result(result)
+                return
+
+            if args[0] == "set" and len(args) > 1:
+                # 设置新的别名
+                new_aliases = args[1:]
+                
+                # 验证别名格式
+                for alias in new_aliases:
+                    if not alias.isalnum() and not all(c.isalnum() or c in ['_', '-'] for c in alias):
+                        yield event.plain_result(f"别名 '{alias}' 格式不正确！别名只能包含字母、数字、下划线和连字符。")
+                        return
+                
+                # 更新配置
+                if "command_config" not in self.config:
+                    self.config["command_config"] = {}
+                
+                self.config["command_config"]["convert_command_aliases"] = new_aliases
+                self.config.save_config()
+                
+                # 重新注册命令
+                self._register_commands()
+                
+                result = f"已成功设置新的命令别名！\n"
+                result += f"主命令：/唱\n"
+                result += f"新别名：{', '.join([f'/{alias}' for alias in new_aliases])}\n\n"
+                result += "注意：别名更改后需要重启插件才能生效。"
+                
+                yield event.plain_result(result)
+                return
+
+            yield event.plain_result("用法：\n/svc_command_aliases - 查看当前别名\n/svc_command_aliases set [别名1] [别名2] ... - 设置新的别名列表")
+
+        except Exception as e:
+            logger.error(f"管理命令别名时出错: {str(e)}\n{traceback.format_exc()}")
+            yield event.plain_result(f"管理命令别名时出错：{str(e)}")
 
 def get_chorus_cache_key(source_type, song_info, input_file):
     if source_type == "qqmusic" and song_info and song_info.get("songmid") and song_info.get("level"):

@@ -270,5 +270,18 @@
                 "default": ""
             }
         }
+    },
+    "command_config": {
+        "description": "命令设置",
+        "type": "object",
+        "hint": "命令相关的配置参数",
+        "items": {
+            "convert_command_aliases": {
+                "description": "转换命令别名",
+                "type": "list",
+                "hint": "转换命令的别名列表，可以自定义多个别名。例如：[\"唱歌\", \"变声\", \"转换\"]",
+                "default": ["牢剑唱", "转换"]
+            }
+        }
     }
 } 
