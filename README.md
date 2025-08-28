@@ -1,6 +1,6 @@
 # So-Vits-SVC API 插件
 
-这是一个用于 AstrBot 的 So-Vits-SVC API 语音转换插件。通过该插件，你可以方便地使用 So-Vits-SVC 的语音转换功能。
+这是一个用于 AstrBot 的 So-Vits-SVC API 歌曲转换插件。通过该插件，你可以方便地使用 So-Vits-SVC 的语音转换功能。
 
 ---
 
@@ -8,7 +8,7 @@
 
 - 支持语音转换（WAV格式）
 - 支持 MSST 音频预处理
-- 支持网易云音乐、QQ音乐、哔哩哔哩视频音频下载和转换
+- 支持网易云音乐、QQ音乐、哔哩哔哩、抖音视频音频下载和转换
 - 支持转换结果缓存，提高重复转换效率
 - 可配置的 API 服务器地址
 - 可自定义默认说话人和音调
@@ -21,9 +21,9 @@
 ## 配置说明
 
 ### 基础设置
-- **`base_url`**: API服务器地址（sovits-svc-api）
+- **`base_url`**: So-Vits-SVC API服务器地址
   - 默认值: `http://localhost:1145`
-  - 说明: 
+  - 说明: 指向So-Vits-SVC API服务的地址
 - **`timeout`**: 请求超时时间(秒)
   - 默认值: 300
 - **`msst_url`**: MSST-WebUI API地址
@@ -32,15 +32,41 @@
   - 默认值: `wav.json`
 - **`netease_cookie`**: 网易云音乐Cookie
   - 默认值: 空
-- **`bbdown_path`**: BBDown可执行文件路径
-  - 默认值: `BBDown`
-- **`qqmusic_credential`**: QQ音乐登录凭证
-  - 默认值: 空
 - **`bbdown_cookie`**: 哔哩哔哩Cookie
   - 默认值: 空
 - **`douyin_cookie`**: 抖音Cookie
   - 默认值: 空
   - 说明: 用于访问抖音API的Cookie，提高下载成功率。请从浏览器开发者工具中复制抖音网站的Cookie
+
+### QQ音乐登录说明
+
+使用QQ音乐功能时，系统会在控制台中输出base64编码的二维码图片。请按以下步骤完成登录：
+
+1. 复制控制台中输出的base64编码图片
+2. 在浏览器中打开新标签页
+3. 在地址栏粘贴base64编码，按回车键
+4. 使用QQ音乐APP扫描显示的二维码
+5. 完成登录后即可使用QQ音乐相关功能
+
+### 火山副歌检测API配置
+
+使用副歌检测功能（`-c` 参数）需要配置火山引擎API密钥：
+
+**官方文档**：[火山引擎副歌检测API文档](https://www.volcengine.com/docs/6489/73670)
+
+#### 获取AppKey
+1. 登录火山引擎控制台
+2. 在"音频技术"中的应用管理页面获取AppKey
+3. **重要**：首先需要在"副歌检测"服务中开通服务
+
+#### 获取AK和SK
+1. 在火山引擎控制台的"API访问密钥"页面
+2. 新建访问密钥，获取AK（Access Key）和SK（Secret Key）
+
+#### 配置参数
+- **`ak`**: 火山引擎Access Key
+- **`sk`**: 火山引擎Secret Key  
+- **`appkey`**: 火山引擎AppKey（从音频技术应用管理获取）
 
 
 ### 语音转换设置
@@ -72,7 +98,102 @@
 
 ---
 
+## 快速开始
+
+1. **配置API服务**：按照下面的环境准备部分架起So-Vits-SVC API和MSST-WebUI API
+2. **配置插件参数**：设置必要的API密钥和Cookie
+3. **使用转换命令**：使用 `/唱` 命令进行歌曲转换
+
+**基本使用示例：**
+```shell
+/唱 0 0 起风了  # 转换网易云音乐中的"起风了"
+/唱 0 0 起风了 -c  # 只转换副歌部分
+/唱 0 0 起风了 -q 30  # 跳过前30秒，截取30秒进行转换
+```
+
+---
+
 ## 使用方法
+
+### 环境准备
+
+在使用此插件之前，需要先架起两个API服务：
+
+#### 1. 架起 So-Vits-SVC API
+
+1. 克隆 So-Vits-SVC 仓库（api分支）：
+```bash
+git clone -b api https://github.com/bei123/so-vits-svc.git
+cd so-vits-svc
+```
+
+2. 安装依赖：
+```bash
+pip install -r requirements.txt
+```
+
+3. 创建模型目录结构：
+```bash
+mkdir -p model
+cd model
+# 在model文件夹中创建你的模型文件夹，例如：
+mkdir my_model
+cd my_model
+# 将模型文件（.pth）和配置文件（config.json）放入模型文件夹中
+```
+
+4. 启动 So-Vits-SVC API 服务：
+```bash
+python fastapi_api_full_song.py
+```
+
+默认情况下，API服务会在 `http://localhost:1145` 启动。
+
+**注意：** 确保在 `model` 文件夹中正确放置了模型文件（.pth）和配置文件（config.json），API服务才能正常工作。
+
+#### 2. 架起 MSST-WebUI API
+
+1. 克隆 MSST-WebUI 仓库（api分支）：
+```bash
+git clone -b api https://github.com/bei123/MSST-WebUI.git
+cd MSST-WebUI
+```
+
+2. 安装依赖：
+```bash
+pip install -r requirements.txt
+```
+
+3. 启动 MSST-WebUI 界面：
+```bash
+python webUI.py
+```
+
+4. 在浏览器中访问 `http://localhost:7860`，在WebUI界面中：
+   - 下载所需的模型
+   - 配置预设文件
+   - 将预设文件名填入插件的 `msst_preset` 配置项
+
+5. 启动 MSST-WebUI API 服务：
+```bash
+python scripts/preset_infer_api.py
+```
+
+默认情况下，API服务会在 `http://localhost:9000` 启动。
+
+**注意：** 必须先通过WebUI界面下载模型和配置预设文件，然后才能正常使用API服务。
+
+#### 3. 验证服务状态
+
+启动两个API服务后，可以使用以下命令验证服务是否正常运行：
+
+```bash
+# 检查 So-Vits-SVC API
+curl http://localhost:1145/docs
+
+# 检查 MSST-WebUI API  
+curl http://localhost:9000/docs
+```
 
 ### 常用命令
 
@@ -84,6 +205,26 @@
 - `/clear_cache`：清空所有缓存
 - `/douyin_info`：获取抖音视频信息
 - `/唱`：转换语音（所有用户均可用）
+
+### 自定义命令别名
+
+在配置文件的 `command_config` 中可以自定义多个转换命令别名，例如：
+
+```json
+{
+  "command_config": {
+    "convert_command_aliases": ["唱歌", "变声", "转换", "牢剑唱"]
+  }
+}
+```
+
+这样你就可以使用自定义的别名来调用转换命令，比如：
+- `/唱歌` 等同于 `/唱`
+- `/变声` 等同于 `/唱`
+- `/转换` 等同于 `/唱`
+- `/牢剑唱` 等同于 `/唱`
+
+**注意：** 在配置界面中，你可以通过"转换命令别名"设置来添加、编辑或删除这些别名。
 
 ### 检查服务状态
 ```shell
@@ -103,12 +244,37 @@
 /唱 0 0 douyin https://v.douyin.com/yWuwc--_--c/  # 转换抖音视频
 ```
 
+### 更多使用示例
+
+```shell
+# 使用不同模型转换
+/唱 0 0 起风了 -m H  # 使用H模型
+/唱 0 0 起风了 -m G  # 使用G模型
+
+# 组合使用参数
+/唱 0 0 起风了 -m H -c  # 指定模型 + 副歌检测
+/唱 0 0 起风了 -m H -q 30  # 指定模型 + 快速截取
+
+# 转换不同平台的音乐
+/唱 0 0 qq 起风了  # QQ音乐
+/唱 0 0 bilibili BV1xx411c7mD  # 哔哩哔哩视频
+/唱 0 0 douyin https://v.douyin.com/yWuwc--_--c/  # 抖音视频
+```
+
+### 参数说明
+
+- **`-q`**: 快速截取模式，跳过前30秒后截取指定秒数，格式为 `-q 秒数`，例如 `-q 30` 表示跳过前30秒后截取30秒
+- **`-m`**: 指定模型，格式为 `-m 模型名称`，例如 `-m H` 表示使用H模型
+- **`-c`**: 副歌检测模式，只对检测到的副歌片段进行处理，提高转换效率
+
+**注意：** `-q` 和 `-c` 参数不能同时使用，因为它们都是用来截取音频片段的。
+
 > **注意：**
 
 > - 转换完成后会自动发送转换后的音频文件
 > - 使用网易云音乐下载时，需要正确配置 `netease_cookie`
-> - 使用哔哩哔哩下载时，需要正确配置 `bbdown_path` 和 `bbdown_cookie`
-> - 使用QQ音乐下载时，需要正确配置 `qqmusic_credential`
+> - 使用哔哩哔哩下载时，需要正确配置 `bbdown_cookie`
+> - 使用QQ音乐下载时，需要按照QQ音乐登录说明完成登录
 > - 使用抖音下载时，需要正确配置 `douyin_cookie`
 
 ---
@@ -165,6 +331,8 @@
 3. 配置参数是否正确
 4. 网易云音乐 cookie 是否有效
 5. 哔哩哔哩 cookie 是否有效
+6. 火山引擎副歌检测API配置是否正确（使用 `-c` 参数时）
+7. QQ音乐登录是否成功
 
 ---
 
