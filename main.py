@@ -1171,6 +1171,11 @@ class SoVitsSvcPlugin(Star):
         message = event.message_str.strip()
         logger.info(f"on_convert_alias 收到消息: {message}")
         
+        # 如果消息以 /唱 开头，跳过处理，避免与主命令冲突
+        if message.startswith("/唱") or message.startswith("唱 "):
+            logger.info(f"消息 '{message}' 是主命令，跳过别名处理")
+            return
+        
         # 获取配置的别名
         aliases = getattr(self, 'convert_command_aliases', ["牢剑唱", "转换"])
         if not aliases:
