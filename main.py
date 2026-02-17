@@ -964,7 +964,7 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件 - 支持抖音、B站、QQ音乐、网易云音乐",
-    version="2.0.0",
+    version="2.0.1",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
