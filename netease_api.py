@@ -52,12 +52,16 @@ class NeteaseMusicAPI:
         """计算文本的MD5摘要并转换为十六进制字符串"""
         return self._hex_digest(self._hash_digest(text))
 
+    # 仅接受 gzip/deflate，避免服务端返回 br 导致 aiohttp 无法解码（需 brotli 依赖）
+    _COMMON_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/2.10.2.200154",
+        "Referer": "",
+        "Accept-Encoding": "gzip, deflate",
+    }
+
     async def _post(self, url, params):
         """发送POST请求"""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/2.10.2.200154",
-            "Referer": "",
-        }
+        headers = dict(self._COMMON_HEADERS)
         cookies = {"os": "pc", "appver": "", "osver": "", "deviceId": "pyncm!"}
         cookies.update(self.cookies)
 
@@ -208,9 +212,10 @@ class NeteaseMusicAPI:
         """
         url = "https://interface3.music.163.com/api/v3/song/detail"
         data = {"c": json.dumps([{"id": song_id, "v": 0}])}
+        headers = dict(self._COMMON_HEADERS)
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(url=url, data=data) as response:
+            async with session.post(url=url, data=data, headers=headers) as response:
                 # 关键：忽略content_type
                 result = await response.json(content_type=None)
 
@@ -245,9 +250,10 @@ class NeteaseMusicAPI:
             "ytv": "0",
             "yrv": "0",
         }
+        headers = dict(self._COMMON_HEADERS)
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(url=url, data=data, cookies=self.cookies) as response:
+            async with session.post(url=url, data=data, cookies=self.cookies, headers=headers) as response:
                 response_text = await response.text()
                 try:
                     result = json.loads(response_text)
@@ -360,8 +366,9 @@ class NeteaseMusicAPI:
             file_path = f"{song_name}.mp3"
 
         print(f"开始下载 {song_name}...")
+        headers = dict(self._COMMON_HEADERS)
         async with aiohttp.ClientSession() as session:
-            async with session.get(download_url) as response:
+            async with session.get(download_url, headers=headers) as response:
                 if response.status == 200:
                     with open(file_path, "wb") as f:
                         async for chunk in response.content.iter_chunked(8192):

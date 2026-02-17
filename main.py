@@ -11,13 +11,18 @@ import os
 import time
 import uuid
 import aiohttp
+from pydantic import Field, PrivateAttr
+from pydantic.dataclasses import dataclass
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
 from astrbot.api.event.filter import command, permission_type
 from astrbot.api.star import register
 from astrbot.core.config import AstrBotConfig
 from astrbot.core import logger
-from astrbot.core.message.components import Record
+from astrbot.core.agent.run_context import ContextWrapper
+from astrbot.core.agent.tool import FunctionTool, ToolExecResult
+from astrbot.core.astr_agent_context import AstrAgentContext
+from astrbot.core.message.message_event_result import MessageChain, MessageEventResult
 from astrbot.core.star.filter.permission import PermissionType
 from .netease_api import NeteaseMusicAPI
 from . import bilibili_api
@@ -125,16 +130,19 @@ class MSSTProcessor:
             preferred_preset: 首选的预设文件名
 
         Returns:
-            可用的预设文件名
+            可用的预设路径，统一使用正斜杠以便 MSST 服务端（可能为 Linux）正确识别
         """
+        def _preset_path(name: str) -> str:
+            return f"presets/{name}".replace("\\", "/")
+
         if preferred_preset in self.available_presets:
-            return os.path.join("presets", preferred_preset)
+            return _preset_path(preferred_preset)
 
         for preset in self.available_presets:
             if preset.endswith(".json"):
-                return os.path.join("presets", preset)
+                return _preset_path(preset)
 
-        return os.path.join("presets", preferred_preset)
+        return _preset_path(preferred_preset)
 
     async def process_audio(
         self, input_file: str, preset_name: str = "wav.json"
@@ -187,13 +195,17 @@ class MSSTProcessor:
                             if response.status == 200:
                                 result = await response.json()
                                 logger.info(f"MSST处理结果: {result}")
-                                if result["status"] == "success":
+                                if result.get("status") == "success":
                                     logger.info("MSST处理成功")
                                     return result
                                 else:
-                                    logger.error(f"MSST处理失败: {result.get('message', '未知错误')}")
+                                    msg = result.get("message", "未知错误")
+                                    logger.error(f"MSST处理失败: {msg}")
+                                    return {"status": "error", "message": msg}
                             else:
-                                logger.error(f"MSST处理失败: {response.text}")
+                                body = await response.text()
+                                logger.error(f"MSST处理失败: [{response.status}] {body}")
+                                return {"status": "error", "message": f"HTTP {response.status}: {body}"}
 
                 except asyncio.TimeoutError:
                     logger.error("MSST处理请求超时")
@@ -785,6 +797,9 @@ class VoiceConverter:
                 return False
             logger.info("服务健康状态检查通过")
 
+            # 说话人 ID 以配置/命令为准，直接传给服务端，不与服务端列表比对
+            setattr(self, "_last_convert_error_message", None)
+
             # 读取音频文件
             try:
                 with open(input_wav, "rb") as f:
@@ -880,6 +895,20 @@ class VoiceConverter:
                             error_msg = await response.text()
                             logger.error(f"转换失败！状态码: {response.status}")
                             logger.error(f"错误信息: {error_msg}")
+                            if "not in the speaker list" in error_msg or "speaker" in error_msg.lower():
+                                try:
+                                    import json
+                                    detail = json.loads(error_msg)
+                                    msg = detail.get("detail", detail.get("message", error_msg))
+                                except Exception:
+                                    msg = error_msg
+                                models = await self.get_available_models()
+                                hint = f"当前可用说话人：{', '.join(models)}。" if models else ""
+                                setattr(
+                                    self,
+                                    "_last_convert_error_message",
+                                    f"人声转换失败：{msg}。{hint}请使用 /svc_speakers [说话人ID] 设置有效说话人，例如：/svc_speakers 0",
+                                )
                             return False
             except asyncio.TimeoutError:
                 logger.error("转换请求超时")
@@ -935,7 +964,7 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件 - 支持抖音、B站、QQ音乐、网易云音乐",
-    version="1.3.7",
+    version="2.0.0",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
@@ -963,7 +992,24 @@ class SoVitsSvcPlugin(Star):
         
         # 动态注册命令（从配置中读取别名）
         self._register_commands()
-        
+
+        # 注册 LLM 工具：哔哩哔哩视频信息、QQ 音乐歌曲信息、网易云音乐歌曲信息、预设列表、说话人列表、清空缓存、转换语音
+        bilibili_tool = BilibiliVideoInfoTool()
+        bilibili_tool._plugin = self
+        qqmusic_tool = QQMusicSongInfoTool()
+        qqmusic_tool._plugin = self
+        netease_tool = NeteaseMusicSongInfoTool()
+        netease_tool._plugin = self
+        preset_tool = SvcPresetListTool()
+        preset_tool._plugin = self
+        speakers_tool = SvcSpeakersTool()
+        speakers_tool._plugin = self
+        clear_cache_tool = SvcClearCacheTool()
+        clear_cache_tool._plugin = self
+        convert_voice_tool = SvcConvertVoiceTool()
+        convert_voice_tool._plugin = self
+        self.context.add_llm_tools(bilibili_tool, qqmusic_tool, netease_tool, preset_tool, speakers_tool, clear_cache_tool, convert_voice_tool)
+
     def _register_commands(self):
         """读取命令别名配置"""
         try:
@@ -1385,21 +1431,47 @@ class SoVitsSvcPlugin(Star):
                                 # 如果没有找到-m参数，整个剩余部分都是抖音链接
                                 song_name = " ".join(args[1:])
                     else:
-                        # 如果第一个参数既不是数字也不是来源类型，可能是歌曲名
-                        # 检查是否指定了模型目录
-                        model_index = -1
-                        for i, arg in enumerate(args):
-                            if arg == "-m" and i + 1 < len(args):
-                                model_index = i
-                                break
-
-                        if model_index != -1:
-                            # 如果找到了-m参数，提取模型目录和歌曲名
-                            model_dir = args[model_index + 1]
-                            song_name = " ".join(args[0:model_index])
+                        # 首参数为说话人ID（非数字，如 "H"）：args[0]=说话人, args[1]=音调, args[2:] 为来源类型或歌曲名
+                        speaker_id = str(args[0])
+                        if len(args) >= 2:
+                            try:
+                                pitch_adjust = int(args[1])
+                                if not -12 <= pitch_adjust <= 12:
+                                    pitch_adjust = 0
+                            except ValueError:
+                                pitch_adjust = 0
+                        if len(args) > 2:
+                            if args[2].lower() == "bilibili":
+                                source_type = "bilibili"
+                                model_index = next((i for i, a in enumerate(args) if a == "-m" and i + 1 < len(args)), -1)
+                                song_name = " ".join(args[3:model_index]) if model_index > 3 else " ".join(args[3:])
+                                if model_index != -1:
+                                    model_dir = args[model_index + 1]
+                            elif args[2].lower() == "qq":
+                                source_type = "qqmusic"
+                                model_index = next((i for i, a in enumerate(args) if a == "-m" and i + 1 < len(args)), -1)
+                                song_name = " ".join(args[3:model_index]) if model_index > 3 else " ".join(args[3:])
+                                if model_index != -1:
+                                    model_dir = args[model_index + 1]
+                            elif args[2].lower() == "douyin":
+                                source_type = "douyin"
+                                model_index = next((i for i, a in enumerate(args) if a == "-m" and i + 1 < len(args)), -1)
+                                song_name = " ".join(args[3:model_index]) if model_index > 3 else " ".join(args[3:])
+                                if model_index != -1:
+                                    model_dir = args[model_index + 1]
+                            else:
+                                model_index = next((i for i, a in enumerate(args) if a == "-m" and i + 1 < len(args)), -1)
+                                song_name = " ".join(args[2:model_index]) if model_index > 2 else " ".join(args[2:])
+                                if model_index != -1:
+                                    model_dir = args[model_index + 1]
                         else:
-                            # 如果没有找到-m参数，整个剩余部分都是歌曲名
-                            song_name = " ".join(args[0:])
+                            model_index = next((i for i, a in enumerate(args) if a == "-m" and i + 1 < len(args)), -1)
+                            song_name = " ".join(args[0:model_index]) if model_index != -1 else " ".join(args[0:])
+                            if model_index != -1:
+                                model_dir = args[model_index + 1]
+
+            # 统一为 str，保证传给缓存与 So-VITS-SVC API 的 speaker_id 一致
+            speaker_id = str(speaker_id)
 
             # 生成临时文件路径
             input_file = os.path.join(self.temp_dir, f"input_{uuid.uuid4()}.wav")
@@ -1705,7 +1777,7 @@ class SoVitsSvcPlugin(Star):
             else:
                 if (
                     not hasattr(event.message_obj, "files")
-                    or not event.message_obj.filesx
+                    or not event.message_obj.files
                 ):
                     # 从配置中读取时长限制设置
                     voice_config = self.config.get("voice_config", {})
@@ -1760,6 +1832,15 @@ class SoVitsSvcPlugin(Star):
                     yield event.plain_result("无法处理此类型的文件！")
                     return
 
+            # 确保输入文件已完整写入后再进入 MSST（Agent 用 convert_voice 时等待下载/写入完毕）
+            for _ in range(50):
+                if os.path.exists(input_file) and os.path.getsize(input_file) > 0:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                yield event.plain_result("输入文件未就绪，请稍后重试。")
+                return
+
             # 检查缓存
             cache_params = {
                 "k_step": self.converter.default_k_step,
@@ -1788,7 +1869,7 @@ class SoVitsSvcPlugin(Star):
 
             if cached_file:
                 logger.info(f"使用缓存: {cached_file}")
-                chain = [Record.fromFileSystem(cached_file)]
+                chain = [Comp.Record(file=cached_file, url=cached_file)]
                 yield event.chain_result(chain)
                 return
 
@@ -2005,7 +2086,12 @@ class SoVitsSvcPlugin(Star):
                 convert_success = await convert_task
 
                 if not convert_success:
-                    yield event.plain_result("人声转换失败！")
+                    err_detail = getattr(
+                        self.converter, "_last_convert_error_message", None
+                    )
+                    yield event.plain_result(
+                        err_detail if err_detail else "人声转换失败！"
+                    )
                     return
 
             except Exception as e:
@@ -2072,7 +2158,7 @@ class SoVitsSvcPlugin(Star):
 
                         # 发送结果
                         yield event.plain_result("处理完成！正在发送文件...")
-                        chain = [Record.fromFileSystem(final_file)]
+                        chain = [Comp.Record(file=final_file, url=final_file)]
                         yield event.chain_result(chain)
 
                         # 立即清理内存
@@ -2139,7 +2225,7 @@ class SoVitsSvcPlugin(Star):
 
                         # 发送结果
                         yield event.plain_result("处理完成！正在发送文件...")
-                        chain = [Record.fromFileSystem(final_file)]
+                        chain = [Comp.Record(file=final_file, url=final_file)]
                         yield event.chain_result(chain)
 
                         # 立即清理内存
@@ -2612,5 +2698,488 @@ def extract_bvid(text):
     if match:
         return match.group(1)
     return text.strip()
+
+
+@dataclass
+class BilibiliVideoInfoTool(FunctionTool[AstrAgentContext]):
+    """获取哔哩哔哩视频信息的 LLM 工具。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "get_bilibili_video_info"
+    description: str = (
+        "获取哔哩哔哩（B站）视频的详细信息，包括标题、UP主、分P列表等。"
+        "当用户提供 BV 号或 B 站视频链接时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "bvid_or_url": {
+                    "type": "string",
+                    "description": "哔哩哔哩视频的 BV 号（如 BV1xx411c7mD）或完整视频链接。",
+                },
+            },
+            "required": ["bvid_or_url"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法获取哔哩哔哩视频信息。"
+        plugin = self._plugin
+        bvid_or_url = (kwargs.get("bvid_or_url") or "").strip()
+        if not bvid_or_url:
+            return "请提供哔哩哔哩视频的 BV 号或链接。"
+        try:
+            cookie = plugin.config.get("base_setting", {}).get("bbdown_cookie", "")
+            bvid = extract_bvid(bvid_or_url)
+            video_info = await bilibili_api.fetch_bilibili_video_info(bvid, cookie=cookie)
+            if not video_info:
+                return f"获取视频信息失败：{bvid_or_url}，请检查 BV 号或链接是否正确。"
+            lines = [
+                f"标题：{video_info['title']}",
+                f"UP主：{video_info['uploader']}",
+                f"分P数量：{len(video_info['parts'])}",
+            ]
+            if video_info.get("parts"):
+                lines.append("分P列表：")
+                for part in video_info["parts"]:
+                    lines.append(f"  {part['index']}. {part['title']} (时长: {part['duration']}秒)")
+            if video_info.get("desc"):
+                lines.append(f"简介：{video_info['desc'][:200]}{'...' if len(video_info.get('desc', '')) > 200 else ''}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"获取哔哩哔哩视频信息出错: {str(e)}\n{traceback.format_exc()}")
+            return f"获取视频信息时出错：{str(e)}"
+
+
+@dataclass
+class QQMusicSongInfoTool(FunctionTool[AstrAgentContext]):
+    """获取 QQ 音乐歌曲信息的 LLM 工具。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "get_qqmusic_song_info"
+    description: str = (
+        "根据关键词搜索 QQ 音乐歌曲，返回歌曲名、歌手、专辑、时长等信息。"
+        "当用户想查 QQ 音乐上的歌曲或歌词信息时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "搜索关键词，可以是歌曲名、歌手名等。",
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "返回结果数量，默认 5 条。",
+                },
+            },
+            "required": ["keyword"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法获取 QQ 音乐歌曲信息。"
+        plugin = self._plugin
+        keyword = (kwargs.get("keyword") or "").strip()
+        if not keyword:
+            return "请提供要搜索的歌曲名或歌手名。"
+        limit = int(kwargs.get("limit") or 5)
+        limit = max(1, min(limit, 10))
+        try:
+            if not await plugin.converter.qqmusic_api.ensure_login():
+                return "QQ 音乐未登录，无法搜索歌曲。请先在插件中完成 QQ 音乐登录。"
+            search_results = await plugin.converter.qqmusic_api.search(keyword, limit=limit)
+            if not search_results:
+                return f"未找到与「{keyword}」相关的 QQ 音乐歌曲。"
+            lines = [f"找到 {len(search_results)} 首相关歌曲："]
+            for i, song in enumerate(search_results, 1):
+                name = song.get("name", "未知歌曲")
+                singer = (song.get("singer") or [{}])[0].get("name", "未知歌手")
+                album = (song.get("album") or {}).get("name", "未知专辑")
+                interval = song.get("interval", "未知时长")
+                lines.append(f"{i}. {name} - {singer}")
+                lines.append(f"   专辑：{album}，时长：{interval}秒")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"获取 QQ 音乐歌曲信息出错: {str(e)}\n{traceback.format_exc()}")
+            return f"获取歌曲信息时出错：{str(e)}"
+
+
+@dataclass
+class NeteaseMusicSongInfoTool(FunctionTool[AstrAgentContext]):
+    """获取网易云音乐歌曲信息的 LLM 工具。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "get_netease_song_info"
+    description: str = (
+        "根据关键词搜索网易云音乐歌曲，返回歌曲名、歌手、专辑等信息。"
+        "当用户想查网易云音乐上的歌曲时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "搜索关键词，可以是歌曲名、歌手名等。",
+                },
+                "limit": {
+                    "type": "number",
+                    "description": "返回结果数量，默认 5 条。",
+                },
+            },
+            "required": ["keyword"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法获取网易云音乐歌曲信息。"
+        plugin = self._plugin
+        keyword = (kwargs.get("keyword") or "").strip()
+        if not keyword:
+            return "请提供要搜索的歌曲名或歌手名。"
+        limit = int(kwargs.get("limit") or 5)
+        limit = max(1, min(limit, 15))
+        try:
+            search_results = await plugin.converter.netease_api.search(keyword, limit=limit)
+            if not search_results:
+                return f"未找到与「{keyword}」相关的网易云音乐歌曲。"
+            lines = [f"找到 {len(search_results)} 首相关歌曲："]
+            for i, song in enumerate(search_results, 1):
+                name = song.get("name", "未知歌曲")
+                artists = song.get("artists") or ["未知歌手"]
+                singer = ", ".join(artists) if isinstance(artists, list) else str(artists)
+                album = song.get("album", "未知专辑")
+                song_id = song.get("id", "")
+                lines.append(f"{i}. {name} - {singer}")
+                lines.append(f"   专辑：{album}，歌曲ID：{song_id}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"获取网易云音乐歌曲信息出错: {str(e)}\n{traceback.format_exc()}")
+            return f"获取歌曲信息时出错：{str(e)}"
+
+
+@dataclass
+class SvcPresetListTool(FunctionTool[AstrAgentContext]):
+    """展示当前可用的 MSST/SVC 预设列表的 LLM 工具。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "list_svc_presets"
+    description: str = (
+        "获取当前可用的 MSST-WebUI 预设列表，以及当前使用的预设名称。"
+        "当用户想查看有哪些预设、或询问可用预设时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法获取预设列表。"
+        plugin = self._plugin
+        try:
+            if plugin.converter.msst_processor is None:
+                return "MSST 处理器未初始化，无法获取预设列表。"
+            presets = await plugin.converter.msst_processor.get_presets()
+            if not presets:
+                return "获取预设列表失败，请检查 MSST-WebUI 服务是否正常运行。"
+            lines = ["当前可用的预设列表："]
+            for i, preset in enumerate(presets, 1):
+                lines.append(f"{i}. {preset}")
+            lines.append(f"\n当前使用的预设：{plugin.converter.msst_preset}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"获取预设列表出错: {str(e)}\n{traceback.format_exc()}")
+            return f"获取预设列表失败：{str(e)}"
+
+
+@dataclass
+class SvcSpeakersTool(FunctionTool[AstrAgentContext]):
+    """展示当前可用的说话人列表，支持切换默认说话人的 LLM 工具。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "list_svc_speakers"
+    description: str = (
+        "获取当前可用的 SVC 说话人列表，以及当前默认说话人。"
+        "可传入说话人 ID 将默认说话人切换为指定 ID。"
+        "当用户想查看有哪些说话人、或设置默认说话人时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "speaker_id": {
+                    "type": "string",
+                    "description": "可选。要设为默认的说话人 ID（如 0、1）。不传则仅返回说话人列表与当前默认值。",
+                },
+            },
+            "required": [],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法获取说话人列表。"
+        plugin = self._plugin
+        try:
+            models = await plugin.converter.get_available_models()
+            if not models:
+                return "获取说话人列表失败。"
+            speaker_id_arg = kwargs.get("speaker_id")
+            if speaker_id_arg is not None and str(speaker_id_arg).strip() != "":
+                speaker_id = str(speaker_id_arg).strip()
+                if speaker_id not in models:
+                    return f"说话人 {speaker_id} 不存在。可用说话人：{', '.join(models)}"
+                plugin.converter.default_speaker = speaker_id
+                if "voice_config" not in plugin.config:
+                    plugin.config["voice_config"] = {}
+                plugin.config["voice_config"]["default_speaker"] = speaker_id
+                plugin.config.save_config()
+                return f"已将默认说话人设置为：{speaker_id}"
+            lines = ["当前可用的说话人列表："]
+            for i, speaker in enumerate(models, 1):
+                lines.append(f"{i}. {speaker}")
+            lines.append(f"\n当前默认说话人：{plugin.converter.default_speaker}")
+            lines.append("可通过本工具传入 speaker_id 参数切换默认说话人。")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"获取或设置说话人出错: {str(e)}\n{traceback.format_exc()}")
+            return f"操作失败：{str(e)}"
+
+
+@dataclass
+class SvcClearCacheTool(FunctionTool[AstrAgentContext]):
+    """清空转换缓存的 LLM 工具。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "clear_svc_cache"
+    description: str = (
+        "清空 SVC 语音转换的缓存文件。"
+        "当用户要求清理缓存、清空缓存或释放存储空间时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法清空缓存。"
+        plugin = self._plugin
+        try:
+            plugin.converter.cache_manager.clear_cache()
+            return "缓存已清空"
+        except Exception as e:
+            logger.error(f"清空缓存失败: {str(e)}\n{traceback.format_exc()}")
+            return f"清空缓存失败：{str(e)}"
+
+
+@dataclass
+class SvcConvertVoiceTool(FunctionTool[AstrAgentContext]):
+    """转换语音的 LLM 工具。支持从文件路径、URL、歌曲名、B站视频等进行语音转换。"""
+
+    _plugin: Any = PrivateAttr(default=None)
+
+    name: str = "convert_voice"
+    description: str = (
+        "使用 SVC 模型转换语音。支持多种输入源："
+        "1. 音频文件路径（本地文件路径）"
+        "2. 音频 URL（网络音频链接）"
+        "3. 歌曲名（从网易云音乐搜索下载）"
+        "4. B站视频（通过 BV 号或链接）"
+        "5. QQ 音乐（通过歌曲名）"
+        "当用户要求转换语音、变声、或使用指定说话人转换音频时使用此工具。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "audio_source": {
+                    "type": "string",
+                    "description": "音频来源。可以是：本地文件路径、音频 URL、歌曲名、B站 BV 号或链接、QQ 音乐歌曲名。",
+                },
+                "speaker_id": {
+                    "type": "string",
+                    "description": "可选。说话人 ID（如 '0'、'1'），默认使用配置的默认说话人。",
+                },
+                "pitch_adjust": {
+                    "type": "number",
+                    "description": "可选。音调调整值，范围 -12 到 12，默认 0。",
+                },
+                "source_type": {
+                    "type": "string",
+                    "description": "可选。来源类型：'file'（文件路径）、'url'（URL）、'netease'（网易云）、'bilibili'（B站）、'qqmusic'（QQ音乐）。如果不指定，将根据 audio_source 自动判断。",
+                },
+                "model_dir": {
+                    "type": "string",
+                    "description": "可选。指定使用的模型目录名称。",
+                },
+            },
+            "required": ["audio_source"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        if self._plugin is None:
+            return "错误：工具未绑定插件，无法转换语音。"
+        plugin = self._plugin
+        audio_source = (kwargs.get("audio_source") or "").strip()
+        if not audio_source:
+            return "请提供音频来源（文件路径、URL、歌曲名、BV 号等）。"
+        speaker_id = kwargs.get("speaker_id")
+        if speaker_id:
+            speaker_id = str(speaker_id).strip()
+        pitch_adjust = kwargs.get("pitch_adjust")
+        if pitch_adjust is not None:
+            try:
+                pitch_adjust = int(pitch_adjust)
+                if not -12 <= pitch_adjust <= 12:
+                    return "音调调整值必须在 -12 到 12 之间。"
+            except (ValueError, TypeError):
+                return "音调调整值必须是数字。"
+        source_type = (kwargs.get("source_type") or "").strip().lower()
+        model_dir = (kwargs.get("model_dir") or "").strip() or None
+        try:
+            # 与 _handle_convert_voice 一致：本地文件路径只能通过命令上传文件，Tool 不拼 song_name 走该分支
+            if source_type == "file":
+                return "通过 Tool 暂不支持指定本地文件路径转换，请使用命令上传音频文件后再转换。"
+            # 构建命令参数（顺序与 _handle_convert_voice 解析一致：说话人、音调、可选来源关键词、内容、可选 -m 模型）
+            args = []
+            if speaker_id:
+                args.append(speaker_id)
+            else:
+                args.append(str(plugin.converter.default_speaker))
+            if pitch_adjust is not None:
+                args.append(str(pitch_adjust))
+            else:
+                args.append("0")
+            # 根据 source_type 或自动判断添加来源类型标识
+            if source_type:
+                if source_type == "bilibili":
+                    args.append("bilibili")
+                elif source_type == "qqmusic" or source_type == "qq":
+                    args.append("qq")
+                elif source_type == "douyin":
+                    args.append("douyin")
+                elif source_type == "netease":
+                    pass  # 网易云不需要特殊标识，后面直接 append audio_source
+                elif source_type == "url":
+                    return "URL 类型的音频转换暂不支持通过 Tool 调用，请使用命令方式。"
+            else:
+                # 自动判断：如果是 BV 号或 B站链接，添加 bilibili
+                if "BV" in audio_source.upper() or "bilibili.com" in audio_source.lower():
+                    args.append("bilibili")
+                elif "douyin.com" in audio_source.lower() or "iesdouyin.com" in audio_source.lower():
+                    args.append("douyin")
+                elif audio_source.startswith("http://") or audio_source.startswith("https://"):
+                    return "URL 类型的音频转换暂不支持通过 Tool 调用，请使用命令方式。"
+            args.append(audio_source)
+            if model_dir:
+                args.append("-m")
+                args.append(model_dir)
+            # 构建消息字符串
+            message_str = "/唱 " + " ".join(args)
+            # 创建临时事件对象来调用转换逻辑
+            # 注意：这里需要访问原始事件，但 Tool 的 context 中有 event
+            original_event = context.context.event
+            # 临时修改事件的消息字符串
+            original_message_str = original_event.message_str
+            original_event.message_str = message_str
+            try:
+                # 调用转换处理函数
+                result_messages = []
+                async for result in plugin._handle_convert_voice(original_event):
+                    # 带 chain 的 MessageEventResult（如转换后的音频）用 Record 发到会话里
+                    if isinstance(result, MessageEventResult) and getattr(result, "chain", None):
+                        try:
+                            send_chain = []
+                            for comp in result.chain:
+                                # 语音统一用 Comp.Record(file=path, url=path) 发送（仅 wav）
+                                if comp.__class__.__name__ == "Record":
+                                    path = getattr(comp, "path", None) or getattr(comp, "file", None) or getattr(comp, "url", None)
+                                    if path and isinstance(path, str):
+                                        if path.startswith("file:///"):
+                                            path = path[7:]
+                                        send_chain.append(Comp.Record(file=path, url=path))
+                                else:
+                                    send_chain.append(comp)
+                            if send_chain:
+                                await original_event.send(MessageChain(chain=send_chain))
+                        except Exception as e:
+                            logger.error(f"Tool 转换结果发送失败: {e}")
+                            result_messages.append(f"转换完成但发送失败：{e}")
+                    # 收集结果消息的文本内容（供 Tool 返回值展示）
+                    if isinstance(result, str):
+                        result_messages.append(result)
+                    elif isinstance(result, MessageEventResult):
+                        text = result.get_plain_text()
+                        if text:
+                            result_messages.append(text)
+                    elif hasattr(result, "get_plain_text"):
+                        text = result.get_plain_text()
+                        if text:
+                            result_messages.append(text)
+                    elif hasattr(result, "message_str"):
+                        result_messages.append(result.message_str)
+                    elif hasattr(result, "plain_text"):
+                        result_messages.append(result.plain_text)
+                    else:
+                        try:
+                            if hasattr(result, "message"):
+                                msg = result.message
+                                if hasattr(msg, "get_plain_text"):
+                                    result_messages.append(msg.get_plain_text())
+                                elif hasattr(msg, "plain_text"):
+                                    result_messages.append(msg.plain_text)
+                                elif isinstance(msg, str):
+                                    result_messages.append(msg)
+                            else:
+                                result_messages.append(str(result))
+                        except Exception:
+                            result_messages.append(str(result))
+                # 恢复原始消息字符串
+                original_event.message_str = original_message_str
+                if result_messages:
+                    return "\n".join(result_messages)
+                else:
+                    return "转换任务已提交，请等待处理完成。"
+            except Exception as e:
+                original_event.message_str = original_message_str
+                raise
+        except Exception as e:
+            logger.error(f"转换语音出错: {str(e)}\n{traceback.format_exc()}")
+            return f"转换语音失败：{str(e)}"
 
 
