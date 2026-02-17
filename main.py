@@ -11,7 +11,8 @@ import os
 import time
 import uuid
 import aiohttp
-from pydantic import Field, PrivateAttr
+from dataclasses import field
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.star import Star, Context
@@ -2704,7 +2705,7 @@ def extract_bvid(text):
 class BilibiliVideoInfoTool(FunctionTool[AstrAgentContext]):
     """获取哔哩哔哩视频信息的 LLM 工具。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "get_bilibili_video_info"
     description: str = (
@@ -2760,7 +2761,7 @@ class BilibiliVideoInfoTool(FunctionTool[AstrAgentContext]):
 class QQMusicSongInfoTool(FunctionTool[AstrAgentContext]):
     """获取 QQ 音乐歌曲信息的 LLM 工具。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "get_qqmusic_song_info"
     description: str = (
@@ -2819,7 +2820,7 @@ class QQMusicSongInfoTool(FunctionTool[AstrAgentContext]):
 class NeteaseMusicSongInfoTool(FunctionTool[AstrAgentContext]):
     """获取网易云音乐歌曲信息的 LLM 工具。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "get_netease_song_info"
     description: str = (
@@ -2877,7 +2878,7 @@ class NeteaseMusicSongInfoTool(FunctionTool[AstrAgentContext]):
 class SvcPresetListTool(FunctionTool[AstrAgentContext]):
     """展示当前可用的 MSST/SVC 预设列表的 LLM 工具。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "list_svc_presets"
     description: str = (
@@ -2918,7 +2919,7 @@ class SvcPresetListTool(FunctionTool[AstrAgentContext]):
 class SvcSpeakersTool(FunctionTool[AstrAgentContext]):
     """展示当前可用的说话人列表，支持切换默认说话人的 LLM 工具。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "list_svc_speakers"
     description: str = (
@@ -2975,7 +2976,7 @@ class SvcSpeakersTool(FunctionTool[AstrAgentContext]):
 class SvcClearCacheTool(FunctionTool[AstrAgentContext]):
     """清空转换缓存的 LLM 工具。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "clear_svc_cache"
     description: str = (
@@ -3008,7 +3009,7 @@ class SvcClearCacheTool(FunctionTool[AstrAgentContext]):
 class SvcConvertVoiceTool(FunctionTool[AstrAgentContext]):
     """转换语音的 LLM 工具。支持从文件路径、URL、歌曲名、B站视频等进行语音转换。"""
 
-    _plugin: Any = PrivateAttr(default_factory=lambda: None)
+    _plugin: Any = field(default=None, repr=False)
 
     name: str = "convert_voice"
     description: str = (
