@@ -119,7 +119,9 @@ async def get_sami_token(ak, sk, appkey):
         return None, resp
     return token, resp
 
-async def detect_chorus_api(audio_bytes, volc_conf):
+async def detect_chorus_api(audio_bytes, volc_conf=None):
+    if not volc_conf:
+        return {"msg": "需要配置 volc_chorus (ak/sk/appkey)，请在插件配置中设置"}
     ak = volc_conf["ak"]
     sk = volc_conf["sk"]
     appkey = volc_conf["appkey"]
@@ -131,7 +133,7 @@ async def detect_chorus_api(audio_bytes, volc_conf):
     url = f"https://sami.bytedance.com/api/v1/invoke?version=v4&token={token}&appkey={appkey}&namespace=DeepChorus"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, data=body, headers={"Content-Type": "application/json"})
+            resp = await client.post(url, content=body.encode("utf-8"), headers={"Content-Type": "application/json"})
     except httpx.ReadTimeout:
         return {"msg": "副歌检测请求超时, 请稍后重试或检查网络/API状态"}
     if resp.status_code != 200:

@@ -55,7 +55,7 @@ class CacheManager:
         except Exception as e:
             logger.error(f"保存缓存索引失败: {str(e)}")
 
-    def _generate_cache_key(self, input_file: str, speaker_id: str, pitch_adjust: int, **kwargs) -> str:
+    def _generate_cache_key(self, input_file: str, speaker_id: str, pitch_adjust: int, **kwargs) -> Optional[str]:
         """生成缓存键
 
         Args:
@@ -65,7 +65,7 @@ class CacheManager:
             **kwargs: 其他参数
 
         Returns:
-            缓存键
+            缓存键，失败时返回 None
         """
         try:
             # 检查文件是否存在
@@ -257,7 +257,7 @@ class CacheManager:
         except Exception as e:
             logger.error(f"保存副歌区间缓存失败: {str(e)}")
 
-    def get_chorus_interval(self, cache_key: str, is_custom_key: bool = False) -> dict:
+    def get_chorus_interval(self, cache_key: str, is_custom_key: bool = False) -> Optional[dict]:
         cache = self._load_chorus_cache()
         logger.info(f"[副歌区间缓存] 读取keys: {list(cache.keys())}")
         logger.info(f"[副歌区间缓存] 查找key: {cache_key}, 命中: {cache_key in cache}")

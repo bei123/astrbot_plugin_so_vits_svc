@@ -14,13 +14,13 @@ from hashlib import md5
 from random import randrange
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from typing import Dict
+from typing import Dict, Optional
 
 
 class NeteaseMusicAPI:
     """网易云音乐API类"""
 
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[Dict] = None):
         """初始化API
 
         Args:

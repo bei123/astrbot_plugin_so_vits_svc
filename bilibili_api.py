@@ -237,12 +237,12 @@ async def bilibili_download_api(bvid, save_dir, qn="80", fnval="16", only_audio=
             dash = data["dash"]
             video_url = unescape_url(dash["video"][0]["baseUrl"])
             if only_audio:
-                await download_bilibili_audio(session, dash, save_dir, title, headers, only_audio=True)
+                await download_bilibili_audio(bvid, save_dir, only_audio=True, cookie=cookie)
             else:
                 video_path = os.path.join(save_dir, "video.m4s")
                 print("[DASH] 正在下载视频流...")
                 await download_file(session, video_url, video_path, headers)
-                await download_bilibili_audio(session, dash, save_dir, title, headers, only_audio=False)
+                await download_bilibili_audio(bvid, save_dir, only_audio=False, cookie=cookie)
                 print(f"[DASH] 视频流已保存为: {video_path}")
                 audio_path = os.path.join(save_dir, "audio.m4s")
                 print(f"[DASH] 音频流已保存为: {audio_path}")

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 class DouyinAudioDownloader:
     """抖音音频下载器 - 核心下载逻辑"""
     
-    def __init__(self, output_dir: str = "downloads", proxies: dict = None, 
+    def __init__(self, output_dir: str = "downloads", proxies: Optional[dict] = None, 
                  max_retries: int = 3, timeout: int = 30):
         """
         初始化下载器
@@ -76,7 +76,7 @@ class DouyinAudioDownloader:
         """异步上下文管理器入口"""
         if not self.crawler:
             connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            timeout = aiohttp.ClientTimeout(self.timeout)
             self.session = aiohttp.ClientSession(
                 connector=connector,
                 timeout=timeout,
@@ -349,6 +349,7 @@ class DouyinAudioDownloader:
                     await asyncio.sleep(2 * (attempt + 1))  # 指数退避
                 else:
                     raise Exception(f"下载音频文件失败: {e}")
+        raise RuntimeError("下载失败：未执行任何下载尝试")
 
     async def download_cover(self, cover_url: str, filename: str, format: str = "jpg") -> str:
         """
@@ -413,6 +414,7 @@ class DouyinAudioDownloader:
                     await asyncio.sleep(1 * (attempt + 1))  # 指数退避
                 else:
                     raise Exception(f"下载封面失败: {e}")
+        raise RuntimeError("封面下载失败：未执行任何下载尝试")
 
     async def download_both_audio_and_cover(self, audio_url: str, cover_url: str, filename: str, cover_format: str = "jpg") -> Dict[str, str]:
         """
@@ -503,7 +505,7 @@ class DouyinAudioDownloader:
         prefix = original_name[:max_length-8-3]  # 减去哈希长度和省略号
         return f"{prefix}...{hash_hex}"
     
-    async def download_audio_from_url(self, url: str, custom_filename: str = None, 
+    async def download_audio_from_url(self, url: str, custom_filename: Optional[str] = None, 
                                     download_cover: bool = False, cover_format: str = "jpg") -> Dict[str, Any]:
         """
         从URL下载音频
@@ -545,7 +547,7 @@ class DouyinAudioDownloader:
                 'duration': time.time() - start_time
             }
     
-    async def download_audio_from_aweme_id(self, aweme_id: str, custom_filename: str = None, 
+    async def download_audio_from_aweme_id(self, aweme_id: str, custom_filename: Optional[str] = None, 
                                          download_cover: bool = False, cover_format: str = "jpg") -> Dict[str, Any]:
         """
         从aweme_id下载音频
@@ -601,6 +603,10 @@ class DouyinAudioDownloader:
             
             duration = time.time() - start_time
             
+            file_size = 0
+            if audio_path is not None and os.path.exists(audio_path):
+                file_size = os.path.getsize(audio_path)
+            
             result = {
                 'success': True,
                 'aweme_id': aweme_id,
@@ -609,7 +615,7 @@ class DouyinAudioDownloader:
                 'author_id': video_info.get('author_id', ''),
                 'duration': video_info.get('duration', 0),
                 'file_path': audio_path,
-                'file_size': os.path.getsize(audio_path) if os.path.exists(audio_path) else 0,
+                'file_size': file_size,
                 'download_duration': duration,
                 'audio_url': audio_url,
                 'cover_url': cover_url,
@@ -636,7 +642,7 @@ class DouyinAudioDownloader:
                 'duration': time.time() - start_time
             }
     
-    async def batch_download_audio(self, urls: List[str], output_dir: str = None, 
+    async def batch_download_audio(self, urls: List[str], output_dir: Optional[str] = None, 
                                  download_cover: bool = False, cover_format: str = "jpg") -> List[Dict[str, Any]]:
         """
         批量下载音频
@@ -726,7 +732,7 @@ class DouyinAudioDownloader:
 class DouyinAudioAPI:
     """抖音音频API - 高级接口"""
     
-    def __init__(self, output_dir: str = "downloads", proxies: dict = None, 
+    def __init__(self, output_dir: str = "downloads", proxies: Optional[dict] = None, 
                  max_retries: int = 3, timeout: int = 30):
         """
         初始化API
@@ -739,7 +745,7 @@ class DouyinAudioAPI:
         """
         self.downloader = DouyinAudioDownloader(output_dir, proxies, max_retries, timeout)
     
-    async def download_from_url(self, url: str, filename: str = None, 
+    async def download_from_url(self, url: str, filename: Optional[str] = None, 
                               download_cover: bool = False, cover_format: str = "jpg") -> Dict[str, Any]:
         """
         从URL下载音频
@@ -756,7 +762,7 @@ class DouyinAudioAPI:
         async with self.downloader:
             return await self.downloader.download_audio_from_url(url, filename, download_cover, cover_format)
     
-    async def download_from_id(self, aweme_id: str, filename: str = None, 
+    async def download_from_id(self, aweme_id: str, filename: Optional[str] = None, 
                              download_cover: bool = False, cover_format: str = "jpg") -> Dict[str, Any]:
         """
         从ID下载音频
@@ -789,7 +795,7 @@ class DouyinAudioAPI:
             else:
                 return await self.downloader.get_video_info(url_or_id)
     
-    async def batch_download(self, urls: List[str], output_dir: str = None, 
+    async def batch_download(self, urls: List[str], output_dir: Optional[str] = None, 
                            download_cover: bool = False, cover_format: str = "jpg") -> List[Dict[str, Any]]:
         """
         批量下载
@@ -822,7 +828,7 @@ class DouyinAudioAPI:
 
 # 便捷函数
 async def download_douyin_audio(url: str, output_dir: str = "downloads", 
-                               filename: str = None, proxies: dict = None,
+                               filename: Optional[str] = None, proxies: Optional[dict] = None,
                                download_cover: bool = False, cover_format: str = "jpg") -> Dict[str, Any]:
     """
     便捷函数：下载抖音音频
@@ -842,7 +848,7 @@ async def download_douyin_audio(url: str, output_dir: str = "downloads",
     return await api.download_from_url(url, filename, download_cover, cover_format)
 
 
-async def get_douyin_video_info(url: str, proxies: dict = None) -> Dict[str, Any]:
+async def get_douyin_video_info(url: str, proxies: Optional[dict] = None) -> Dict[str, Any]:
     """
     便捷函数：获取抖音视频信息
     
@@ -858,7 +864,7 @@ async def get_douyin_video_info(url: str, proxies: dict = None) -> Dict[str, Any
 
 
 async def batch_download_douyin_audio(urls: List[str], output_dir: str = "downloads", 
-                                    proxies: dict = None, download_cover: bool = False, 
+                                    proxies: Optional[dict] = None, download_cover: bool = False, 
                                     cover_format: str = "jpg") -> List[Dict[str, Any]]:
     """
     便捷函数：批量下载抖音音频

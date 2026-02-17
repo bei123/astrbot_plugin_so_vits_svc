@@ -6,7 +6,7 @@ So-Vits-SVC API 插件
 提供语音转换、MSST音频处理和网易云音乐下载功能
 """
 
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any, AsyncGenerator
 import os
 import time
 import uuid
@@ -27,7 +27,8 @@ from .douyin_audio_downloader import DouyinAudioAPI
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from astrbot.api.event import filter
-from pedalboard import Pedalboard, Mix, Gain, HighpassFilter, PeakFilter, HighShelfFilter, Delay, Invert, Compressor, Reverb, Limiter
+from pedalboard._pedalboard import Pedalboard
+from pedalboard import Mix, Gain, HighpassFilter, PeakFilter, HighShelfFilter, Delay, Invert, Compressor, Reverb, Limiter
 from pedalboard.io import AudioFile
 import numpy as np
 import psutil
@@ -278,7 +279,7 @@ class MSSTProcessor:
         except Exception as e:
             logger.error(f"获取模型列表失败: {str(e)}")
             return None
-    async def get_latest_output_filename(self, keywords: list) -> str:
+    async def get_latest_output_filename(self, keywords: list) -> Optional[str]:
         """根据关键字优先级列表查找最新的输出文件名（只根据文件名关键字，不检查本地是否存在）"""
 
         async with aiohttp.ClientSession() as session:
@@ -306,7 +307,7 @@ class MSSTProcessor:
 class VoiceConverter:
     """语音转换器"""
 
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[Dict] = None):
         """初始化语音转换器
 
         Args:
@@ -934,10 +935,12 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
     name="so-vits-svc-api",
     author="Soulter",
     desc="So-Vits-SVC API 语音转换插件 - 支持抖音、B站、QQ音乐、网易云音乐",
-    version="1.3.6",
+    version="1.3.7",
 )
 class SoVitsSvcPlugin(Star):
     """So-Vits-SVC API 插件主类"""
+
+    config: AstrBotConfig  # 实例属性，由 __init__ 赋值
 
     def __init__(self, context: Context, config: AstrBotConfig):
         """初始化插件
@@ -989,11 +992,11 @@ class SoVitsSvcPlugin(Star):
             self.convert_command_aliases = ["牢剑唱", "转换"]
 
     @staticmethod
-    def config(config: AstrBotConfig) -> Dict:
+    def get_config_schema(_config: AstrBotConfig) -> Dict:
         """定义插件配置结构
 
         Args:
-            config: AstrBot配置对象
+            _config: AstrBot配置对象（框架可能传入，本方法未使用）
 
         Returns:
             Dict: 配置结构定义
@@ -1156,13 +1159,13 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result(status)
 
     @filter.command("唱")
-    async def convert_voice(self, event: AstrMessageEvent):
+    async def convert_voice(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """转换语音 - 主命令"""
         async for result in self._handle_convert_voice(event):
             yield result
 
     @filter.regex(r"^(?:/)?(.+?)(?:\s+(.+))?$")
-    async def on_convert_alias(self, event: AstrMessageEvent) -> None:
+    async def on_convert_alias(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """处理语音转换别名命令 - 动态别名支持
         
         Args:
@@ -1211,7 +1214,7 @@ class SoVitsSvcPlugin(Star):
         
 
         
-    async def _handle_convert_voice(self, event: AstrMessageEvent):
+    async def _handle_convert_voice(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """转换语音"""
         # 生成任务ID（在函数开始就定义，避免后续引用错误）
         task_id = str(uuid.uuid4())
@@ -2213,7 +2216,7 @@ class SoVitsSvcPlugin(Star):
         yield event.plain_result("没有找到可取消的转换任务")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_speakers", alias=["说话人列表"])
+    @command("svc_speakers", alias={"说话人列表"})
     async def show_speakers(self, event: AstrMessageEvent):
         """展示当前可用的说话人列表，支持切换默认说话人
 
@@ -2256,7 +2259,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取说话人列表失败：{str(e)}\n{traceback.format_exc()}")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_presets", alias=["预设列表"])
+    @command("svc_presets", alias={"预设列表"})
     async def show_presets(self, event: AstrMessageEvent):
         """展示当前可用的预设列表"""
         try:
@@ -2537,7 +2540,7 @@ class SoVitsSvcPlugin(Star):
 
             chain = []
             if result.get('cover_path'):
-                chain.append(Comp.Image.fromFile(result['cover_path']))
+                chain.append(Comp.Image.fromFileSystem(result['cover_path']))
             chain.append(Comp.Plain(result_msg))
             yield event.chain_result(chain)
 
@@ -2546,7 +2549,7 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"下载抖音音频时出错：{str(e)}")
 
     @permission_type(PermissionType.ADMIN)
-    @command("svc_models", alias=["模型列表"])
+    @command("svc_models", alias={"模型列表"})
     async def show_models(self, event: AstrMessageEvent):
         """展示当前可用的模型列表，支持切换默认模型目录
 

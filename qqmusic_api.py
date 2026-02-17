@@ -50,7 +50,7 @@ class QQMusicRoute:
 class QQMusicAPI:
     """QQ音乐API类"""
 
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[Dict] = None):
         """初始化API
 
         Args:
@@ -121,12 +121,12 @@ class QQMusicAPI:
             logger.error(f"清理二维码路径失败: {str(e)}")
             return False
 
-    def _get_latest_qr_file(self, qr_dir: str) -> str:
+    def _get_latest_qr_file(self, qr_dir: str) -> Optional[str]:
         """获取目录中最新的二维码文件
         Args:
             qr_dir: 二维码目录路径
         Returns:
-            str: 最新二维码文件的完整路径
+            最新二维码文件的完整路径，无文件或出错时返回 None
         """
         try:
             # 获取目录中所有的png文件
@@ -247,6 +247,10 @@ class QQMusicAPI:
                     logger.info(f"二维码已保存到: {qr_path}")
                 except Exception as e:
                     logger.error(f"保存二维码失败: {str(e)}")
+                    return False
+
+                if qr_path is None:
+                    logger.error("保存二维码未返回文件路径")
                     return False
 
                 # 读取二维码文件并转换为base64
