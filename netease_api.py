@@ -32,11 +32,17 @@ class NeteaseMusicAPI:
         )
 
     def _parse_cookie(self, text):
-        """解析cookie字符串为字典"""
-        cookie_ = [
-            item.strip().split("=", 1) for item in text.strip().split(";") if item
-        ]
-        cookie_ = {k.strip(): v.strip() for k, v in cookie_}
+        """解析cookie字符串为字典，忽略无等号或空段"""
+        cookie_ = {}
+        for item in text.strip().split(";"):
+            item = item.strip()
+            if not item:
+                continue
+            parts = item.split("=", 1)
+            if len(parts) == 2:
+                k, v = parts[0].strip(), parts[1].strip()
+                if k:
+                    cookie_[k] = v
         return cookie_
 
     def _hex_digest(self, data):
