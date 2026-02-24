@@ -6,7 +6,7 @@ So-Vits-SVC API 插件
 提供语音转换、MSST音频处理和网易云音乐下载功能
 """
 
-from typing import Optional, Dict, List, Tuple, Any, AsyncGenerator
+from typing import Optional, Dict, List, Tuple, Any, AsyncGenerator, cast
 import os
 import time
 import uuid
@@ -961,6 +961,10 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
         )
     return True, ""
 
+# 别名命令 handler 仅接收 event，框架不传 self，用此引用取插件实例
+_convert_alias_plugin_ref: Any = None
+
+
 @register(
     name="so-vits-svc-api",
     author="Soulter",
@@ -981,6 +985,8 @@ class SoVitsSvcPlugin(Star):
         """
         super().__init__(context)
         self.config = config
+        global _convert_alias_plugin_ref
+        _convert_alias_plugin_ref = self  # 供 on_convert_alias(event) 仅单参调用时使用
         self.converter = VoiceConverter(self.config)  # 立即初始化 converter
         self.conversion_tasks = {}  # 存储正在进行的转换任务
         self.msst_processor = None  # 延迟初始化 MSST 处理器
@@ -1009,7 +1015,7 @@ class SoVitsSvcPlugin(Star):
         clear_cache_tool._plugin = self
         convert_voice_tool = SvcConvertVoiceTool()
         convert_voice_tool._plugin = self
-        self.context.add_llm_tools(bilibili_tool, qqmusic_tool, netease_tool, preset_tool, speakers_tool, clear_cache_tool, convert_voice_tool)
+        cast(Context, self.context).add_llm_tools(bilibili_tool, qqmusic_tool, netease_tool, preset_tool, speakers_tool, clear_cache_tool, convert_voice_tool)
 
     def _register_commands(self):
         """读取命令别名配置"""
@@ -1211,56 +1217,6 @@ class SoVitsSvcPlugin(Star):
         async for result in self._handle_convert_voice(event):
             yield result
 
-    @filter.regex(r"^(?:/)?(.+?)(?:\s+(.+))?$")
-    async def on_convert_alias(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
-        """处理语音转换别名命令 - 动态别名支持
-        
-        Args:
-            event: 消息事件对象
-        """
-        message = event.message_str.strip()
-        logger.info(f"on_convert_alias 收到消息: {message}")
-        
-        # 如果消息以 /唱 开头，跳过处理，避免与主命令冲突
-        if message.startswith("/唱") or message.startswith("唱 "):
-            logger.info(f"消息 '{message}' 是主命令，跳过别名处理")
-            return
-        
-        # 获取配置的别名
-        aliases = getattr(self, 'convert_command_aliases', ["牢剑唱", "转换"])
-        if not aliases:
-            aliases = ["牢剑唱", "转换"]
-        
-        logger.info(f"当前配置的别名: {aliases}")
-        
-        # 提取命令和参数
-        import re
-        match = re.match(r"^(?:/)?(.+?)(?:\s+(.+))?$", message)
-        if not match:
-            logger.info(f"消息 '{message}' 不匹配正则表达式")
-            return
-            
-        command = match.group(1).strip()
-        args = match.group(2).strip() if match.group(2) else ""
-        
-        logger.info(f"提取的命令: '{command}'，参数: '{args}'")
-        
-        # 检查是否是配置的别名
-        if command in aliases:
-            logger.info(f"检测到别名命令: {command}，参数: {args}")
-            # 重写消息为标准格式
-            new_message = f"/唱 {args}".strip()
-            event.message_str = new_message
-            logger.info(f"重写消息为: {new_message}")
-            
-            # 调用主命令处理函数
-            async for result in self._handle_convert_voice(event):
-                yield result
-        else:
-            logger.info(f"命令 '{command}' 不在别名列表中")
-        
-
-        
     async def _handle_convert_voice(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """转换语音"""
         # 生成任务ID（在函数开始就定义，避免后续引用错误）
@@ -2679,6 +2635,37 @@ class SoVitsSvcPlugin(Star):
             yield event.plain_result(f"获取模型列表失败：{str(e)}\n{traceback.format_exc()}")
 
 
+@filter.regex(r"^(?:/)?(.+?)(?:\s+(.+))?$")
+async def on_convert_alias(event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
+    """处理语音转换别名命令（仅接收 event，供框架 handler(event) 调用）"""
+    plugin = _convert_alias_plugin_ref
+    if not plugin:
+        return
+    message = event.message_str.strip()
+    logger.info(f"on_convert_alias 收到消息: {message}")
+    if message.startswith("/唱") or message.startswith("唱 "):
+        logger.info(f"消息 '{message}' 是主命令，跳过别名处理")
+        return
+    aliases = getattr(plugin, "convert_command_aliases", ["牢剑唱", "转换"])
+    if not aliases:
+        aliases = ["牢剑唱", "转换"]
+    logger.info(f"当前配置的别名: {aliases}")
+    match = re.match(r"^(?:/)?(.+?)(?:\s+(.+))?$", message)
+    if not match:
+        logger.info(f"消息 '{message}' 不匹配正则表达式")
+        return
+    command = match.group(1).strip()
+    args = match.group(2).strip() if match.group(2) else ""
+    logger.info(f"提取的命令: '{command}'，参数: '{args}'")
+    if command in aliases:
+        logger.info(f"检测到别名命令: {command}，参数: {args}")
+        new_message = f"/唱 {args}".strip()
+        event.message_str = new_message
+        logger.info(f"重写消息为: {new_message}")
+        async for result in plugin._handle_convert_voice(event):
+            yield result
+    else:
+        logger.info(f"命令 '{command}' 不在别名列表中")
 
 
 def get_chorus_cache_key(source_type, song_info, input_file):
