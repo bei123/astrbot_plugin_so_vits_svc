@@ -961,10 +961,6 @@ def check_memory_safe(file_size: int) -> Tuple[bool, str]:
         )
     return True, ""
 
-# 别名命令 handler 仅接收 event，框架不传 self，用此引用取插件实例
-_convert_alias_plugin_ref: Any = None
-
-
 @register(
     name="so-vits-svc-api",
     author="Soulter",
@@ -985,8 +981,6 @@ class SoVitsSvcPlugin(Star):
         """
         super().__init__(context)
         self.config = config
-        global _convert_alias_plugin_ref
-        _convert_alias_plugin_ref = self  # 供 on_convert_alias(event) 仅单参调用时使用
         self.converter = VoiceConverter(self.config)  # 立即初始化 converter
         self.conversion_tasks = {}  # 存储正在进行的转换任务
         self.msst_processor = None  # 延迟初始化 MSST 处理器
@@ -2636,9 +2630,8 @@ class SoVitsSvcPlugin(Star):
 
 
 @filter.regex(r"^(?:/)?(.+?)(?:\s+(.+))?$")
-async def on_convert_alias(event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
-    """处理语音转换别名命令（仅接收 event，供框架 handler(event) 调用）"""
-    plugin = _convert_alias_plugin_ref
+async def on_convert_alias(plugin: Any, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
+    """处理语音转换别名命令（框架以 partial(handler, star_cls) 调用，首参为插件实例）"""
     if not plugin:
         return
     message = event.message_str.strip()
