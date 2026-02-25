@@ -323,6 +323,62 @@ curl http://localhost:9000/docs
 
 ---
 
+## 向 AstrBot 注册 Tool（LLM 工具）
+
+本插件支持通过 AstrBot 的 **LLM Tool** 机制，将语音转换等能力注册为 AI 可调用的工具。注册后，对话中的 Agent 可以按需调用这些工具（如“唱一首歌”“转换这段音频”等）。
+
+### 基本用法
+
+从 AstrBot 导入 `llm_tool` 装饰器，按规范编写异步函数并写好文档字符串即可注册为工具：
+
+```python
+from astrbot.api import llm_tool
+from astrbot.core.platform.astr_message_event import AstrMessageEvent
+
+@llm_tool(name="convert_song")  # 不填 name 时使用函数名
+async def convert_song(event: AstrMessageEvent, song_name: str, source: str):
+    """根据歌名和来源搜索并转换歌曲为指定音色。
+
+    Args:
+        song_name(string): 歌曲名称或关键词
+        source(string): 来源，如 netease / qq / bilibili 等
+    """
+    # 调用插件内已有的转换逻辑，返回 str 会进入下一轮 LLM 的上下文
+    return "转换结果说明"
+```
+
+### 规范说明
+
+1. **函数签名**  
+   - 第一个参数必须为 `event: AstrMessageEvent`，其后为工具自身参数。
+
+2. **文档字符串（Docstring）**  
+   - 工具描述写在函数 docstring 首段。  
+   - 每个参数用 `Args:` 列出，格式：`参数名(类型): 描述`。  
+   - 支持的参数类型：`string`、`number`、`object`、`array`、`boolean`。  
+   - 数组可写为 `list[string]` 等形式。
+
+3. **返回值**  
+   - 返回 `str`：内容会加入下一次 LLM 请求的上下文中，供 AI 总结或继续对话。  
+   - 返回 `None`：不把工具结果注入后续 LLM 上下文。
+
+4. **发送消息与终止**  
+   - 在函数内可用 `yield` 发送消息。  
+   - 需要终止后续处理时调用 `event.stop_event()` 再 `yield`。
+
+5. **导入方式**  
+   - 推荐：`from astrbot.api import llm_tool`  
+   - 或：`from astrbot.api.event.filter import llm_tool`
+
+### 相关事件（可选）
+
+- **`on_using_llm_tool`**：在调用工具**之前**触发，可接收 `event`、`tool`、`tool_args`。  
+- **`on_llm_tool_respond`**：在调用工具**之后**触发，可接收 `event`、`tool`、`tool_args`、`tool_result`。
+
+用于在工具调用前后做日志、统计或结果再处理。
+
+---
+
 ## 问题反馈
 
 如果遇到问题，请检查：
