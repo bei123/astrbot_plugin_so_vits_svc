@@ -56,7 +56,8 @@ def extract_douyin_urls(text: str) -> List[str]:
     """
     # 抖音链接的正则表达式模式
     douyin_patterns = [
-        r'https?://v\.douyin\.com/[a-zA-Z0-9]+/?',  # 短链接格式
+        # 短链 path 含字母数字、下划线、连字符等（勿用仅 [a-zA-Z0-9]+，会截断如 xxx_yyy）
+        r'https?://v\.douyin\.com/[A-Za-z0-9_\-]+/?',
         r'https?://www\.douyin\.com/video/\d+',    # 标准视频链接
         r'https?://www\.douyin\.com/[\w/]+',       # 其他抖音链接
         r'https?://iesdouyin\.com/share/video/\d+', # 分享链接格式
@@ -320,6 +321,10 @@ class MSSTProcessor:
 class VoiceConverter:
     """语音转换器"""
 
+    # DDSP Reflow HTTP API 路径（与 ddspsvc_6_3.api_reflow 一致，不写进配置）
+    DDSP_REFLOW_INFER_PATH = "/v1/infer"
+    DDSP_REFLOW_SPEAKERS_PATH = "/v1/models/speakers"
+
     def __init__(self, config: Optional[Dict] = None):
         """初始化语音转换器
 
@@ -341,6 +346,14 @@ class VoiceConverter:
 
         # API 设置
         self.api_url = self.base_setting.get("base_url", "http://localhost:1145")
+        self.svc_backend = (
+            (self.base_setting.get("svc_backend") or "so_vits").strip().lower()
+        )
+        if self.svc_backend not in ("so_vits", "ddsp_reflow"):
+            logger.warning(
+                f"未知 svc_backend={self.svc_backend!r}，回退为 so_vits"
+            )
+            self.svc_backend = "so_vits"
         self.msst_url = self.base_setting.get("msst_url", "http://localhost:9000")
         self.msst_preset = self.base_setting.get("msst_preset", "wav.json")
         self.model_dir = self.base_setting.get("model_dir", "default")  # 添加模型目录配置
@@ -360,6 +373,7 @@ class VoiceConverter:
         self.default_f0_predictor = self.voice_config.get("default_f0_predictor", "fcpe")
         self.default_enhancer_adaptive_key = self.voice_config.get("default_enhancer_adaptive_key", 0)
         self.default_cr_threshold = self.voice_config.get("default_cr_threshold", 0.05)
+        self.ddsp_spk_id = str(self.voice_config.get("ddsp_spk_id", "1"))
         self.enable_mixing = self.voice_config.get("enable_mixing", True)
 
         # 混音设置
@@ -382,11 +396,27 @@ class VoiceConverter:
         )
 
     async def get_available_models(self) -> Optional[List[str]]:
-        """获取可用的模型列表
-
-        Returns:
-            模型列表，失败返回 None
-        """
+        """So-Vits：/models；DDSP Reflow：GET /v1/models/speakers 中的 speaker 名"""
+        if self.svc_backend == "ddsp_reflow":
+            url = f"{self.api_url.rstrip('/')}{VoiceConverter.DDSP_REFLOW_SPEAKERS_PATH}"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            items = data.get("speakers") or []
+                            names: List[str] = []
+                            for it in items:
+                                if isinstance(it, dict) and it.get("speaker") is not None:
+                                    names.append(str(it["speaker"]))
+                            if names:
+                                return sorted(names)
+            except Exception as e:
+                logger.error(f"获取 DDSP Reflow 说话人列表失败: {e}")
+            allowed = self.voice_config.get("ddsp_allowed_speakers") or []
+            if isinstance(allowed, list) and allowed:
+                return [str(x) for x in allowed]
+            return [str(i) for i in range(10)]
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.api_url}/models") as response:
@@ -397,6 +427,45 @@ class VoiceConverter:
         except Exception as e:
             logger.error(f"获取模型列表失败: {str(e)}")
             return None
+
+    def _reflow_infer_url(self) -> str:
+        return f"{self.api_url.rstrip('/')}{VoiceConverter.DDSP_REFLOW_INFER_PATH}"
+
+    @staticmethod
+    def _looks_like_reflow_ckpt_path(s: str) -> bool:
+        """判断 model_dir 是否应按服务端 .pt / 全路径 传给 API（而非 speaker 文件夹名）。"""
+        t = (s or "").strip()
+        if not t:
+            return False
+        if t.lower().endswith(".pt"):
+            return True
+        if os.path.isabs(t):
+            return True
+        if "/" in t or "\\" in t:
+            return True
+        return False
+
+    def _reflow_resolve_ckpt_and_speaker(
+        self, model_dir: str, speaker_id: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """model_ckpt 与 speaker 互斥，均由默认 model_dir / 命令说话人推导。返回 (ckpt, speaker_folder)。"""
+        md = (model_dir or "").strip()
+        sid = (speaker_id or "").strip()
+
+        if md and self._looks_like_reflow_ckpt_path(md):
+            return (md, None)
+        if md and md.lower() not in ("default", ""):
+            return (None, md)
+        if sid:
+            return (None, sid)
+        return (None, None)
+
+    @staticmethod
+    def _pitch_extractor_for_reflow(f0_predictor: str) -> str:
+        p = (f0_predictor or "rmvpe").strip().lower()
+        if p == "fcpe":
+            return "rmvpe"
+        return f0_predictor or "rmvpe"
 
     def _load_audio(self, path: str) -> np.ndarray:
         """加载音频文件
@@ -645,15 +714,30 @@ class VoiceConverter:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.api_url}/health") as response:
-                    if response.status == 200:
-                        result = await response.json()
+                    if response.status != 200:
+                        return None
+                    result = await response.json()
+                    if self.svc_backend == "ddsp_reflow":
+                        pending = int(result.get("queue_pending", 0) or 0)
+                        qmax = int(result.get("queue_max", 0) or 0)
+                        md = result.get("models_dir")
                         return {
                             "status": result.get("status"),
-                            "queue_size": result.get("queue_size", 0),
-                            "active_tasks": result.get("active_tasks", 0),
-                            "cached_models": result.get("cached_models", 0)
+                            "model_loaded": bool(result.get("model_loaded")),
+                            "models_dir": md,
+                            "queue_size": pending,
+                            "queue_pending": pending,
+                            "queue_max": qmax,
+                            "queue_limited": bool(result.get("queue_limited")),
+                            "active_tasks": 0,
+                            "cached_models": 0,
                         }
-                    return None
+                    return {
+                        "status": result.get("status"),
+                        "queue_size": result.get("queue_size", 0),
+                        "active_tasks": result.get("active_tasks", 0),
+                        "cached_models": result.get("cached_models", 0),
+                    }
         except Exception as e:
             logger.error(f"健康检查失败: {str(e)}")
             return None
@@ -793,7 +877,12 @@ class VoiceConverter:
                 logger.error("服务未就绪")
                 return False
 
-            if health.get("queue_size", 0) >= self.max_queue_size:
+            if self.svc_backend == "ddsp_reflow":
+                if health.get("queue_limited") and health.get("queue_max", 0) > 0:
+                    if health.get("queue_size", 0) >= health.get("queue_max", 0):
+                        logger.error("DDSP Reflow 推理队列已满")
+                        return False
+            elif health.get("queue_size", 0) >= self.max_queue_size:
                 logger.error("服务器任务队列已满")
                 return False
             logger.info("服务健康状态检查通过")
@@ -817,100 +906,159 @@ class VoiceConverter:
                 logger.error(f"读取音频文件失败: {str(e)}\n{traceback.format_exc()}")
                 return False
 
-            # 准备表单数据
-            data = aiohttp.FormData()
-            data.add_field("audio",
-                         audio_data,
-                         filename="input.wav",
-                         content_type="audio/wav")
-            data.add_field("model_dir", model_dir)
-            data.add_field("tran", str(pitch_adjust))
-            data.add_field("spk", str(speaker_id))
-            data.add_field("wav_format", "wav")
-            data.add_field("k_step", str(k_step))
-            data.add_field("shallow_diffusion", str(shallow_diffusion).lower())
-            data.add_field("only_diffusion", str(only_diffusion).lower())
-            data.add_field("cluster_infer_ratio", str(cluster_infer_ratio))
-            data.add_field("auto_predict_f0", str(auto_predict_f0).lower())
-            data.add_field("noice_scale", str(noice_scale))
-            data.add_field("f0_filter", str(f0_filter).lower())
-            data.add_field("f0_predictor", f0_predictor)
-            data.add_field("enhancer_adaptive_key", str(enhancer_adaptive_key))
-            data.add_field("cr_threshold", str(cr_threshold))
+            in_name = os.path.basename(input_wav) or "input.wav"
+            in_ext = os.path.splitext(in_name)[1] or ".wav"
+            audio_ct = "audio/wav"
+            if in_ext.lower() == ".flac":
+                audio_ct = "audio/flac"
 
-            # 发送请求
-            logger.info(f"开始转换音频: {input_wav}")
-            logger.info(f"输出文件: {output_wav}")
-            logger.info(f"使用说话人ID: {speaker_id}")
-            logger.info(f"音调调整: {pitch_adjust}")
-            logger.info(f"API地址: {self.api_url}/wav2wav")
-            logger.info(f"超时时间: {self.timeout}秒")
-
+            timeout = aiohttp.ClientTimeout(total=float(self.timeout))
             start_time = time.time()
+
+            async def _save_wav_response(response: aiohttp.ClientResponse) -> bool:
+                os.makedirs(os.path.dirname(output_wav), exist_ok=True)
+                audio_content = await response.read()
+                logger.info(f"收到音频数据，大小: {len(audio_content)} 字节")
+                if len(audio_content) == 0:
+                    logger.error("收到的音频数据为空")
+                    return False
+                with open(output_wav, "wb") as f:
+                    f.write(audio_content)
+                if not os.path.exists(output_wav) or os.path.getsize(output_wav) == 0:
+                    logger.error("输出文件无效")
+                    return False
+                logger.info(
+                    f"转换成功！输出: {output_wav}，耗时: {time.time() - start_time:.2f}s"
+                )
+                return True
+
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    if self.svc_backend == "ddsp_reflow":
+                        ckpt, spk_folder = self._reflow_resolve_ckpt_and_speaker(
+                            model_dir, str(speaker_id)
+                        )
+                        data_rf = aiohttp.FormData()
+                        data_rf.add_field(
+                            "audio",
+                            audio_data,
+                            filename=in_name,
+                            content_type=audio_ct,
+                        )
+                        if ckpt:
+                            data_rf.add_field("model_ckpt", ckpt)
+                        elif spk_folder:
+                            data_rf.add_field("speaker", spk_folder)
+                        data_rf.add_field("spk_id", self.ddsp_spk_id)
+                        data_rf.add_field("spk_mix_dict", "None")
+                        data_rf.add_field("key", str(pitch_adjust))
+                        data_rf.add_field(
+                            "formant_shift_key", str(enhancer_adaptive_key)
+                        )
+                        pe = self._pitch_extractor_for_reflow(f0_predictor)
+                        data_rf.add_field("pitch_extractor", pe)
+                        data_rf.add_field("f0_min", "50")
+                        data_rf.add_field("f0_max", "1100")
+                        data_rf.add_field("threhold", "-60")
+                        data_rf.add_field("infer_step", str(k_step))
+                        data_rf.add_field("method", "auto")
+                        data_rf.add_field("t_start", "0.0")
+                        infer_url = self._reflow_infer_url()
+                        log_sel = f"model_ckpt={ckpt}" if ckpt else f"speaker={spk_folder!r}"
+                        logger.info(
+                            f"DDSP Reflow 推理: {infer_url} {log_sel} spk_id={self.ddsp_spk_id} key={pitch_adjust}"
+                        )
+                        async with session.post(infer_url, data=data_rf) as response:
+                            logger.info(f"收到响应，状态码: {response.status}")
+                            if response.status == 200:
+                                return await _save_wav_response(response)
+                            error_msg = await response.text()
+                            logger.error(
+                                f"DDSP Reflow 转换失败 [{response.status}]: {error_msg}"
+                            )
+                            msg = error_msg
+                            try:
+                                import json
+
+                                detail = json.loads(error_msg)
+                                if isinstance(detail, dict):
+                                    msg = str(
+                                        detail.get("detail", detail.get("message", msg))
+                                    )
+                            except Exception:
+                                pass
+                            setattr(
+                                self,
+                                "_last_convert_error_message",
+                                f"人声转换失败：{msg}",
+                            )
+                            return False
+
+                    data = aiohttp.FormData()
+                    data.add_field(
+                        "audio",
+                        audio_data,
+                        filename="input.wav",
+                        content_type="audio/wav",
+                    )
+                    data.add_field("model_dir", model_dir)
+                    data.add_field("tran", str(pitch_adjust))
+                    data.add_field("spk", str(speaker_id))
+                    data.add_field("wav_format", "wav")
+                    data.add_field("k_step", str(k_step))
+                    data.add_field("shallow_diffusion", str(shallow_diffusion).lower())
+                    data.add_field("only_diffusion", str(only_diffusion).lower())
+                    data.add_field("cluster_infer_ratio", str(cluster_infer_ratio))
+                    data.add_field("auto_predict_f0", str(auto_predict_f0).lower())
+                    data.add_field("noice_scale", str(noice_scale))
+                    data.add_field("f0_filter", str(f0_filter).lower())
+                    data.add_field("f0_predictor", f0_predictor)
+                    data.add_field(
+                        "enhancer_adaptive_key", str(enhancer_adaptive_key)
+                    )
+                    data.add_field("cr_threshold", str(cr_threshold))
+
+                    logger.info(f"开始转换音频: {input_wav} -> {output_wav}")
+                    logger.info(f"So-VITS API: {self.api_url}/wav2wav 超时 {self.timeout}s")
                     async with session.post(
-                        f"{self.api_url}/wav2wav",
-                        data=data,
-                        timeout=self.timeout
+                        f"{self.api_url}/wav2wav", data=data
                     ) as response:
                         logger.info(f"收到响应，状态码: {response.status}")
                         if response.status == 200:
                             try:
-                                # 确保输出目录存在
                                 os.makedirs(os.path.dirname(output_wav), exist_ok=True)
-                                logger.info(f"输出目录已创建: {os.path.dirname(output_wav)}")
-
-                                # 保存转换后的音频
-                                audio_content = await response.read()
-                                logger.info(f"收到音频数据，大小: {len(audio_content)} 字节")
-
-                                if len(audio_content) == 0:
-                                    logger.error("收到的音频数据为空")
-                                    return False
-
-                                with open(output_wav, "wb") as f:
-                                    f.write(audio_content)
-                                logger.info(f"音频文件已保存: {output_wav}")
-
-                                # 验证输出文件
-                                if not os.path.exists(output_wav):
-                                    logger.error(f"输出文件不存在: {output_wav}")
-                                    return False
-
-                                output_size = os.path.getsize(output_wav)
-                                if output_size == 0:
-                                    logger.error("输出文件大小为0")
-                                    return False
-
-                                logger.info(f"输出文件大小: {output_size} 字节")
-
-                                process_time = time.time() - start_time
-                                logger.info(f"转换成功！输出文件已保存为: {output_wav}")
-                                logger.info(f"处理耗时: {process_time:.2f}秒")
-                                return True
+                                return await _save_wav_response(response)
                             except Exception as e:
                                 logger.error(f"保存输出文件时出错: {str(e)}")
                                 return False
-                        else:
-                            error_msg = await response.text()
-                            logger.error(f"转换失败！状态码: {response.status}")
-                            logger.error(f"错误信息: {error_msg}")
-                            if "not in the speaker list" in error_msg or "speaker" in error_msg.lower():
-                                try:
-                                    import json
-                                    detail = json.loads(error_msg)
-                                    msg = detail.get("detail", detail.get("message", error_msg))
-                                except Exception:
-                                    msg = error_msg
-                                models = await self.get_available_models()
-                                hint = f"当前可用说话人：{', '.join(models)}。" if models else ""
-                                setattr(
-                                    self,
-                                    "_last_convert_error_message",
-                                    f"人声转换失败：{msg}。{hint}请使用 /svc_speakers [说话人ID] 设置有效说话人，例如：/svc_speakers 0",
+                        error_msg = await response.text()
+                        logger.error(f"转换失败！状态码: {response.status}")
+                        logger.error(f"错误信息: {error_msg}")
+                        if (
+                            "not in the speaker list" in error_msg
+                            or "speaker" in error_msg.lower()
+                        ):
+                            try:
+                                import json
+
+                                detail = json.loads(error_msg)
+                                msg = detail.get(
+                                    "detail", detail.get("message", error_msg)
                                 )
-                            return False
+                            except Exception:
+                                msg = error_msg
+                            models = await self.get_available_models()
+                            hint = (
+                                f"当前可用说话人：{', '.join(models)}。"
+                                if models
+                                else ""
+                            )
+                            setattr(
+                                self,
+                                "_last_convert_error_message",
+                                f"人声转换失败：{msg}。{hint}请使用 /svc_speakers [说话人ID] 设置有效说话人，例如：/svc_speakers 0",
+                            )
+                        return False
             except asyncio.TimeoutError:
                 logger.error("转换请求超时")
                 return False
@@ -1084,7 +1232,7 @@ class SoVitsSvcPlugin(Star):
                                 "items": {
                                     "convert_command_aliases": {
                                         "description": "转换命令别名",
-                                        "type": "array",
+                                        "type": "list",
                                         "hint": "转换命令的别名列表，可以自定义多个别名",
                                         "default": ["牢剑唱", "转换"],
                                         "items": {
@@ -1111,7 +1259,7 @@ class SoVitsSvcPlugin(Star):
                             "items": {
                                 "convert_command_aliases": {
                                     "description": "转换命令别名",
-                                    "type": "array",
+                                    "type": "list",
                                     "hint": "转换命令的别名列表，可以自定义多个别名",
                                     "default": ["牢剑唱", "转换"],
                                     "items": {
@@ -1125,7 +1273,7 @@ class SoVitsSvcPlugin(Star):
             }
 
     def _update_douyin_config(self) -> None:
-        """更新抖音配置 - 从实际配置中读取cookie并更新到config.yaml"""
+        """将 base_setting.douyin_cookie 同步到 douyin_sdk_config.json（供 douyin_link_sdk 读取）"""
         try:
             # 从实际配置中获取抖音cookie
             base_setting = self.config.get("base_setting", {})
@@ -1140,20 +1288,19 @@ class SoVitsSvcPlugin(Star):
             # 导入配置更新模块
             from .update_douyin_config import load_config_yaml, update_config_yaml, save_config_yaml
             
-            # 加载config.yaml
             config = load_config_yaml()
-            if not config:
-                logger.error("无法加载config.yaml")
+            if config is None:
+                logger.error("无法加载或解析抖音 SDK 配置文件（douyin_sdk_config.json）")
                 return
             
             # 更新配置
             if not update_config_yaml(config, douyin_cookie):
-                logger.error("更新config.yaml失败")
+                logger.error("更新抖音 SDK 配置失败")
                 return
             
             # 保存配置
             if not save_config_yaml(config):
-                logger.error("保存config.yaml失败")
+                logger.error("保存抖音 SDK 配置失败")
                 return
             
             logger.info("抖音配置更新成功")
@@ -1171,7 +1318,8 @@ class SoVitsSvcPlugin(Star):
         douyin_config = {
             "output_dir": base_setting.get("douyin_download_dir", "data/downloads/douyin"),
             "timeout": base_setting.get("douyin_timeout", 60),
-            "max_retries": base_setting.get("douyin_max_retries", 3)
+            "max_retries": base_setting.get("douyin_max_retries", 3),
+            "cookie": base_setting.get("douyin_cookie", "") or "",
         }
         self.douyin_api = DouyinAudioAPI(**douyin_config)
         await self.msst_processor.initialize()
@@ -1187,17 +1335,36 @@ class SoVitsSvcPlugin(Star):
         """检查服务状态"""
         health = await self.converter.check_health()
         if not health:
-            yield event.plain_result(
-                "服务未就绪，请检查 So-Vits-SVC API 服务是否已启动。"
+            hint = (
+                "请检查 DDSP Reflow API（uvicorn ddspsvc_6_3.api_reflow:app）是否已启动。"
+                if self.converter.svc_backend == "ddsp_reflow"
+                else "请检查 So-Vits-SVC API 服务是否已启动。"
             )
+            yield event.plain_result(f"服务未就绪，{hint}")
             return
 
         status = "✅ 服务正常运行\n"
-        status += (
-            f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载'}\n"
-        )
-        status += f"当前队列大小: {health.get('queue_size', 0)}\n"
-        status += f"So-Vits-SVC API 地址: {self.converter.api_url}\n"
+        status += f"转换后端: {self.converter.svc_backend}\n"
+        if self.converter.svc_backend == "ddsp_reflow":
+            status += (
+                f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载（可用 model_dir / 说话人传 speaker，或服务端已加载与环境变量）'}\n"
+            )
+            status += f"推理队列: {health.get('queue_size', 0)}"
+            if health.get("queue_limited"):
+                status += f" / 上限 {health.get('queue_max', 0)}\n"
+            else:
+                status += "（未限制）\n"
+            status += f"DDSP Reflow: {self.converter.api_url}{VoiceConverter.DDSP_REFLOW_INFER_PATH}\n"
+            mdh = health.get("models_dir")
+            if mdh:
+                status += f"服务端模型根目录 (REFLOW_MODELS_DIR): {mdh}\n"
+            status += f"推理用 spk_id（模型内）: {self.converter.ddsp_spk_id}\n"
+        else:
+            status += (
+                f"模型加载状态: {'已加载' if health.get('model_loaded') else '未加载'}\n"
+            )
+            status += f"当前队列大小: {health.get('queue_size', 0)}\n"
+            status += f"So-Vits-SVC API 地址: {self.converter.api_url}\n"
         status += f"MSST-WebUI API 地址: {self.converter.msst_url}\n"
         status += f"MSST 预设: {self.converter.msst_preset}\n"
         status += f"默认说话人ID: {self.converter.default_speaker}\n"
@@ -1662,16 +1829,17 @@ class SoVitsSvcPlugin(Star):
                     return
             elif song_name:
                 try:
-                    # 如果指定了模型目录，验证其是否存在
+                    # 如果指定了模型目录，验证其是否存在（So-Vits 为目录名；DDSP 为服务端 .pt 路径，无法本机校验）
                     if model_dir:
-                        models = await self.converter.get_available_models()
-                        if not models:
-                            yield event.plain_result("获取模型列表失败！")
-                            return
+                        if self.converter.svc_backend != "ddsp_reflow":
+                            models = await self.converter.get_available_models()
+                            if not models:
+                                yield event.plain_result("获取模型列表失败！")
+                                return
 
-                        if model_dir not in models:
-                            yield event.plain_result(f"模型目录 {model_dir} 不存在！")
-                            return
+                            if model_dir not in models:
+                                yield event.plain_result(f"模型目录 {model_dir} 不存在！")
+                                return
 
                     # yield event.plain_result(f"正在搜索歌曲：{song_name}...")
                     song_info = await self.converter.netease_api.get_song_with_highest_quality(
@@ -2598,30 +2766,49 @@ class SoVitsSvcPlugin(Star):
         args = message.split()[1:] if message else []
 
         try:
-            # 获取可用模型列表
             models = await self.converter.get_available_models()
             if not models:
-                yield event.plain_result("获取模型列表失败！")
+                err = "获取模型列表失败！"
+                if self.converter.svc_backend == "ddsp_reflow":
+                    err += "（DDSP 请检查 GET /v1/models/speakers）"
+                yield event.plain_result(err)
                 return
 
             if len(args) > 0:
                 model_dir = args[0]
                 if model_dir not in models:
-                    yield event.plain_result(f"模型目录 {model_dir} 不存在！")
+                    label = (
+                        "说话人文件夹" if self.converter.svc_backend == "ddsp_reflow" else "模型目录"
+                    )
+                    yield event.plain_result(f"{label} {model_dir} 不存在！")
                     return
 
                 self.converter.model_dir = model_dir
                 self.config["base_setting"]["model_dir"] = model_dir
                 self.config.save_config()
-                yield event.plain_result(f"已将默认模型目录设置为: {model_dir}")
+                if self.converter.svc_backend == "ddsp_reflow":
+                    yield event.plain_result(
+                        f"已将默认 speaker 文件夹（model_dir）设置为: {model_dir}"
+                    )
+                else:
+                    yield event.plain_result(f"已将默认模型目录设置为: {model_dir}")
                 return
 
-            model_info = "下面列出了可用的模型目录:\n"
+            if self.converter.svc_backend == "ddsp_reflow":
+                model_info = "DDSP Reflow：以下为服务端 REFLOW_MODELS_DIR 下可解析的 speaker 文件夹：\n"
+            else:
+                model_info = "下面列出了可用的模型目录:\n"
             for i, model in enumerate(models, 1):
                 model_info += f"{i}. {model}\n"
 
-            model_info += f"\n当前默认模型目录: [{self.converter.model_dir}]\n"
-            model_info += "Tips: 使用 /svc_models <模型目录名>，即可设置默认模型目录"
+            model_info += f"\n当前默认 model_dir: [{self.converter.model_dir}]\n"
+            if self.converter.svc_backend == "ddsp_reflow":
+                model_info += (
+                    "Tips: /svc_models <名> 设置默认 model_dir；"
+                    "文件夹名→API speaker，.pt/路径→API model_ckpt；default 时用默认说话人作 speaker"
+                )
+            else:
+                model_info += "Tips: 使用 /svc_models <模型目录名>，即可设置默认模型目录"
 
             yield event.plain_result(model_info)
 

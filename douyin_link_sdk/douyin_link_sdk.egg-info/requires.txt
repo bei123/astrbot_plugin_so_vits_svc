@@ -1,0 +1,8 @@
+requests
+aiohttp
+PyExecJS
+urllib3
+
+[browser]
+playwright
+playwright-stealth

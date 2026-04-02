@@ -12,3 +12,6 @@ rich
 qrcode
 gmssl
 importlib_resources
+aiocache
+requests>=2.28.0
+PyExecJS>=1.5.1

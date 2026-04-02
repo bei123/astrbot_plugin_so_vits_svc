@@ -4,10 +4,18 @@
         "type": "object",
         "hint": "API服务器的基本配置",
         "items": {
+            "svc_backend": {
+                "description": "人声转换后端",
+                "type": "string",
+                "hint": "So-Vits-SVC 使用 /wav2wav；DDSP Reflow 使用 /v1/infer。",
+                "default": "so_vits",
+                "options": ["so_vits", "ddsp_reflow"],
+                "labels": ["So-Vits-SVC（/wav2wav）", "DDSP-SVC 6.3 Reflow（/v1/infer）"]
+            },
             "base_url": {
                 "description": "API服务器地址",
                 "type": "string",
-                "hint": "如果是本地部署，可以使用 http://127.0.0.1:1145",
+                "hint": "So-Vits-SVC 示例 http://127.0.0.1:1145；DDSP Reflow 示例 http://127.0.0.1:8088（推理固定 /v1/infer，说话人列表固定 GET /v1/models/speakers）",
                 "default": "default"
             },
             "timeout": {
@@ -31,7 +39,7 @@
             "model_dir": {
                 "description": "默认模型目录",
                 "type": "string",
-                "hint": "默认使用的模型目录名称，需要在model目录下存在对应的模型文件",
+                "hint": "So-Vits：模型目录名。DDSP Reflow：仅此项控制推理用 speaker 或 model_ckpt——填 REFLOW_MODELS_DIR 下子文件夹名则传 speaker；填服务端 .pt 路径或含路径分隔符则传 model_ckpt",
                 "default": "default"
             },
             "netease_cookie": {
@@ -141,8 +149,23 @@
             "default_speaker": {
                 "description": "默认说话人ID",
                 "type": "string",
-                "hint": "默认使用的说话人ID",
+                "hint": "So-Vits：说话人 ID。DDSP Reflow：当 model_dir 为 default 时作为 API speaker 文件夹名；若已设非 default 的 model_dir 则以其为准",
                 "default": "0"
+            },
+            "ddsp_spk_id": {
+                "description": "DDSP Reflow 模型内说话人 ID",
+                "type": "string",
+                "hint": "对应推理 API 的 spk_id 表单字段（与 REFLOW_MODELS_DIR 子文件夹名不同），默认 1",
+                "default": "1"
+            },
+            "ddsp_allowed_speakers": {
+                "description": "DDSP Reflow 允许的说话人 ID 列表",
+                "type": "list",
+                "hint": "仅 ddsp_reflow 后端用于 /svc_speakers 校验；留空则允许 0-9",
+                "default": [],
+                "items": {
+                    "type": "string"
+                }
             },
             "default_pitch": {
                 "description": "默认音调调整",

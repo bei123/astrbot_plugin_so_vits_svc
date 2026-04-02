@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: douyin-link-sdk
+Version: 0.1.0
+Summary: Standalone Douyin share-link parse and single-item download SDK
+Author: 
+Requires-Python: >=3.8
+Requires-Dist: requests
+Requires-Dist: aiohttp
+Requires-Dist: PyExecJS
+Requires-Dist: urllib3
+Provides-Extra: browser
+Requires-Dist: playwright; extra == "browser"
+Requires-Dist: playwright-stealth; extra == "browser"
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
